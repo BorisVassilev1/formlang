@@ -42,19 +42,19 @@ class WordSet {
 	}
 
 	WordID copyWord(WordID id) {
-		if (id >= nextWordID) { throw std::out_of_range("Invalid WordID"); }
+		if (id >= nextWordID) { throw std::out_of_range(std::format("Invalid WordID: {}, size: {}", id, nextWordID)); }
 		wordsData.emplace_back(wordsData[id].start, wordsData[id].length);
 		return nextWordID++;
 	}
 
 	auto getWord(WordID id) const {
-		if (id >= nextWordID) { throw std::out_of_range("Invalid WordID"); }
+		if (id >= nextWordID) { throw std::out_of_range(std::format("Invalid WordID: {}, size: {}", id, nextWordID)); }
 		const auto &[start, length] = wordsData[id];
 		return std::span{words.data() + start, length};
 	}
 
 	auto getWordData(WordID id) const {
-		if (id >= nextWordID) { throw std::out_of_range("Invalid WordID"); }
+		if (id >= nextWordID) { throw std::out_of_range(std::format("Invalid WordID: {}, size: {}", id, nextWordID)); }
 		return wordsData[id];
 	}
 

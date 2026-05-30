@@ -8,6 +8,7 @@
 #include <cassert>
 
 #include "FST.hpp"
+#include "utils.h"
 #include "wordset.hpp"
 #include "debug.hpp"
 
@@ -22,11 +23,11 @@ class TFSA {
 
 	using Map = unordered_multimap<State, std::tuple<Letter, StringID, State>>;
 
-	unsigned int			  N = 0;
+	unsigned int		 N = 0;
 	unordered_set<State> qFirsts;
 	unordered_set<State> qFinals;
-	Map						  transitions;
-	WordSet<Letter>			  words;
+	Map					 transitions;
+	WordSet<Letter>		 words;
 
 	unordered_set<StringID> f_eps{};
 
@@ -58,8 +59,9 @@ class TFSA {
 			if (w1 == Letter('\"')) out << "\\";
 			out << w1 << ",";
 			for (const auto &letter : w2) {
-				if ((uint8_t(letter) < 128 && uint8_t(letter) >= 32) || size_t(letter) > 256) out << letter;
-				else out << (int)letter;
+				// if ((uint8_t(letter) < 128 && uint8_t(letter) >= 32) || size_t(letter) > 256)
+				out << letter;	   // TODO: This will break for some Letter types
+								   // else out << (int)letter;
 			}
 			out << ">\"];\n";
 		}
@@ -67,6 +69,164 @@ class TFSA {
 	}
 
 	State newState() { return N++; }
+
+	/// this will work only for the type BPEToken because this outputs the outpt wordID-s and not the actual letters
+	/// this was done because that is the case for byte-pair encodings
+	auto f(const std::vector<Letter> &input) const {
+		using DelayID  = UniqueWordSet<Letter>::WordID;
+		using BigState = std::vector<std::tuple<State, DelayID>>;	  // (state, position in input)
+		static BigState			state0;
+		static BigState			state1;
+		static WordSet<DelayID> stateDelays0;
+		static WordSet<DelayID> stateDelays1;
+
+		auto *currentState	  = &state0;
+		auto *nextState		  = &state1;
+		auto *stateDelays	  = &stateDelays0;
+		auto *nextStateDelays = &stateDelays1;
+
+		currentState->clear();
+		nextState->clear();
+		stateDelays->clear();
+		stateDelays->addWord(std::span<DelayID>{});
+		nextStateDelays->clear();
+		nextStateDelays->addWord(std::span<DelayID>{});
+
+		for (const auto &q : qFirsts) {
+			currentState->push_back({q, 0});		// all have epsilon delay
+		}
+		std::sort(currentState->begin(), currentState->end());
+
+		std::vector<Letter> output;
+		for (size_t pos = 0; pos < input.size(); ++pos) {
+			// std::cout << "TFSA::f: processing position " << pos << " / " << input.size()
+			//		  << ", current states: " << currentState.size();
+			//  for (const auto &[state, delayIndex] : currentState) {
+			//	auto oldDelay = stateDelays[delayIndex];
+			//	std::cout << " (state " << state << " with delay [";
+			//	for (const auto &l : oldDelay) std::cout << l;
+			//	std::cout << "])";
+			//  }
+			// std::cout << std::endl;
+
+			DelayID delayID = -1;
+			for (const auto &[state, delayIndex] : *currentState) {
+				auto it		  = transitions.equal_range(state);
+				auto oldDelay = stateDelays->getWord(delayIndex);
+				for (const auto &[_, value] : RangeFromPair(it)) {
+					const auto &[w1, id2, to] = value;
+					if (w1 != input[pos]) continue;
+					auto w2 = std::span{&id2, &id2 + 1};
+
+					// std::cout << " TFSA::f: from state " << state << " with delay [";
+					// for (const auto &l : oldDelay)
+					//	std::cout << l << ' ';
+					// std::cout << "], reading '" << w1 << "', output [";
+					// for (const auto &l : w2)
+					//	std::cout << l << ' ';
+					// std::cout << "], to state " << to << std::endl;
+
+					auto wordToDelay = std::views::concat(oldDelay, w2);
+					auto temp_id	 = nextStateDelays->addWord(wordToDelay);
+					if (delayID == (DelayID)-1) {
+						delayID = nextStateDelays->addWord(wordToDelay);
+					} else {
+						auto i = fl::commonPrefixLen(wordToDelay, nextStateDelays->getWord(delayID));
+						nextStateDelays->replaceWithSubstr(delayID, 0, i);
+					}
+					nextState->push_back({to, temp_id});
+				}
+			}
+			if (delayID == (DelayID)-1) {
+				dbLog(dbg::LOG_ERROR, "TFSA::f: no transitions found at position ", pos, ", symbol: '", input[pos],
+					  "'\n");
+				break;
+			}
+
+			auto eaten = nextStateDelays->getWord(delayID);
+
+			// std::cout << " TFSA::f: eaten output [";
+			// for (const auto &l : eaten)
+			//	std::cout << l;
+			// std::cout << "] delay id: " << delayID << std::endl;
+			if (!eaten.empty()) {
+				// std::cout << " TFSA::f: outputting eaten [";
+				// for (const auto &l : eaten)
+				//	std::cout << l << ' ';
+				// std::cout << "]" << std::endl;
+
+				for (const auto &l : eaten)
+					if (l != 0) output.push_back(Letter(l));
+			}
+
+			for (auto &[q, delay_id] : *nextState) {
+				auto wrongDelay = nextStateDelays->getWord(delay_id);
+				if (wrongDelay.size() < eaten.size()) continue;
+				auto correctDelay =
+					std::span{(DelayID *)wrongDelay.data() + eaten.size(), wrongDelay.size() - eaten.size()};
+				auto new_id = nextStateDelays->addWord(correctDelay);
+				delay_id	= new_id;
+			}
+
+			std::sort(nextState->begin(), nextState->end());
+			nextState->erase(std::unique(nextState->begin(), nextState->end()), nextState->end());
+
+			std::swap(currentState, nextState);
+			std::swap(stateDelays, nextStateDelays);
+			nextState->clear();
+			nextStateDelays->clear();
+		}
+		return output;
+	}
+
+	void writeBinary(std::ostream &out) const {
+		out.write(reinterpret_cast<const char *>(&N), sizeof(N));
+		size_t transitions_size = transitions.size();
+		out.write(reinterpret_cast<const char *>(&transitions_size), sizeof(transitions_size));
+		for (const auto &trans_map : transitions) {
+			size_t map_size = 0;
+			for (const auto &[_, _] : transitions)
+				++map_size;
+			out.write(reinterpret_cast<const char *>(&map_size), sizeof(map_size));
+			for (const auto &[letter, value] : transitions) {
+				const auto &[w1, id2, to] = value;
+				out.write(reinterpret_cast<const char *>(&letter), sizeof(letter));
+				out.write(reinterpret_cast<const char *>(&id2), sizeof(id2));
+				out.write(reinterpret_cast<const char *>(&to), sizeof(to));
+			}
+		}
+		size_t finals_size = qFinals.size();
+		out.write(reinterpret_cast<const char *>(&finals_size), sizeof(finals_size));
+		for (const auto &final_state : qFinals) {
+			out.write(reinterpret_cast<const char *>(&final_state), sizeof(final_state));
+		}
+	}
+
+	void readBinary(std::istream &in) {
+		in.read(reinterpret_cast<char *>(&N), sizeof(N));
+		size_t transitions_size;
+		in.read(reinterpret_cast<char *>(&transitions_size), sizeof(transitions_size));
+		for (size_t t = 0; t < transitions_size; ++t) {
+			size_t map_size;
+			in.read(reinterpret_cast<char *>(&map_size), sizeof(map_size));
+			for (size_t i = 0; i < map_size; ++i) {
+				Letter	 letter;
+				StringID id2;
+				State	 to;
+				in.read(reinterpret_cast<char *>(&letter), sizeof(letter));
+				in.read(reinterpret_cast<char *>(&id2), sizeof(id2));
+				in.read(reinterpret_cast<char *>(&to), sizeof(to));
+				transitions.insert({t, {letter, id2, to}});
+			}
+		}
+		size_t finals_size;
+		in.read(reinterpret_cast<char *>(&finals_size), sizeof(finals_size));
+		for (size_t i = 0; i < finals_size; ++i) {
+			State final_state;
+			in.read(reinterpret_cast<char *>(&final_state), sizeof(final_state));
+			qFinals.insert(final_state);
+		}
+	}
 };
 
 template <class Letter>
@@ -231,22 +391,29 @@ auto trimFSA(TFSA<Letter> &&fsa) {
 		}
 
 		std::vector<State> stack;
-		for (const auto &final : fsa.qFinals) {
-			visited_back[final] = true;
-			stack.push_back(final);
-		}
-		while (!stack.empty()) {
-			State current = stack.back();
-			stack.pop_back();
-			for (const auto &next : backwardTransitions[current]) {
-				if (!visited_back[next]) {
-					visited_back[next] = true;
-					stack.push_back(next);
+		if (fsa.qFinals.size() != fsa.N) {
+			for (const auto &final : fsa.qFinals) {
+				visited_back[final] = true;
+				stack.push_back(final);
+			}
+			while (!stack.empty()) {
+				State current = stack.back();
+				stack.pop_back();
+				for (const auto &next : backwardTransitions[current]) {
+					if (!visited_back[next]) {
+						visited_back[next] = true;
+						stack.push_back(next);
+					}
 				}
 			}
+		} else {
+			for (unsigned int i = 0; i < fsa.N; ++i) {
+				visited_back[i] = true;
+			}
 		}
+		dbLog(dbg::LOG_DEBUG, "Finished backward reachability")
 
-		for (const auto &first : fsa.qFirsts) {
+			for (const auto &first : fsa.qFirsts) {
 			visited_forw[first] = true;		// mark initial states as visited
 			stack.push_back(first);
 		}
@@ -262,12 +429,21 @@ auto trimFSA(TFSA<Letter> &&fsa) {
 				}
 			}
 		}
+		dbLog(dbg::LOG_DEBUG, "Finished forward reachability")
 	}
-	int				   cnt = 0;
+	size_t			   cnt = 0;
 	std::vector<State> new_map(fsa.N, -1);
 	for (unsigned int i = 0; i < fsa.N; ++i) {
 		if (visited_back[i] && visited_forw[i]) { new_map[i] = cnt++; }
 	}
+	dbLog(dbg::LOG_DEBUG, std::format("Trimmed FSA: {} / {} states are reachable from both sides.\n",
+									  std::count(new_map.begin(), new_map.end(), -1u) ^ fsa.N, fsa.N));
+
+	if (cnt == fsa.N) {
+		dbLog(dbg::LOG_DEBUG, "No states were removed during trimming.");
+		return std::move(fsa);
+	}
+
 	TFSA<Letter> new_fsa;
 	new_fsa.N = cnt;
 	new_fsa.qFirsts.reserve(fsa.qFirsts.size());
@@ -337,7 +513,7 @@ auto pseudoDeterminizeFST(TFSA<Letter> &&fst) {
 
 	TFSA<Letter>										dfa;
 	std::vector<std::reference_wrapper<const BigState>> states;
-	unordered_map<BigState, State, MyHash>			state_map;
+	unordered_map<BigState, State, MyHash>				state_map;
 	std::queue<State>									queue;
 	UniqueWordSet<Letter>								secondTapeWords;
 

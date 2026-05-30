@@ -1,5 +1,22 @@
-# LL(1) Grammar Parser
-## Project for the "Data Structures Programming" course at FMI
+# FormLang 
+
+Library for working with formal languages. Currently features:
+- Context-Free Grammars (CFG)
+- Deterministic PushDown Automata (DPDA)
+- LL(1) Grammar Parser (Parse-Tree builder)
+- Earley Parser (no parse-tree building)
+- Regular Expression Parser 
+- Regular Relation Expression Parser
+- Two-Tape Finite-State Automata
+- Subsequential Transducers
+- UTF-8 Alphabet
+
+The was initially developed as a project for the "Data Structures Programming" course at FMI, but later expanded in the courses "Finite State Automata and Applications", "Compilers - Introduction", "Languages, Automata and Computability".
+
+Sections will be documented here in the near future.
+
+## LL(1) Grammar Parser
+### Project for the "Data Structures Programming" course at FMI
 
 This project is a library that defines Context-Free Grammar, Deterministic PushDown Automaton, and Parser (Parse-Tree builder) as C++ classes.
 
@@ -28,7 +45,7 @@ This produces the following parse-tree:
 ```
 A more complex example can be seen in [language.cpp](https://github.com/BorisVassilev1/sdp_2023/blob/master/DPDA/language.cpp).
 
-## Notes on algorithms used
+### Notes on algorithms used
 
 The main algorithm used to construct a Parser for a LL(1) grammar is described in detail in [this presentation from UCLA](http://ll1academy.cs.ucla.edu/static/LLParsing.pdf) and a proof for its correctness is described in [this Chapter from UCalgary's Compiler Construction course](https://pages.cpsc.ucalgary.ca/~robin/class/411/LL1.2.html). While a general test and parsing algorithm exist for `LL(k)` grammars for every `k` (described in [this paper](https://www.sciencedirect.com/science/article/pii/S0019995870904468?via%3Dihub)), such implementation would be impractical because the size of the PDA's that parse those grammars grows exponentially with `k`. Also, in the future left-factorization can be implemented to allow for the parsing of some non-LL(1) grammars with LL(1) languages. 
 

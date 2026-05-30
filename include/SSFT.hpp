@@ -19,10 +19,10 @@ class SSFT {
 	using StringID = WordSet<Letter>::WordID;
 	using Map	   = fl::unordered_map<std::tuple<State, Letter>, std::pair<StringID, State>>;
 
-	WordSet<Letter>						words;
-	Map									transitions;
-	fl::unordered_set<State>			qFinals;
-	unsigned int						N = 0;
+	WordSet<Letter>					   words;
+	Map								   transitions;
+	fl::unordered_set<State>		   qFinals;
+	unsigned int					   N = 0;
 	fl::unordered_map<State, StringID> output;
 
 	SSFT() = default;
@@ -69,11 +69,13 @@ class SSFT {
 
 		using namespace std::chrono_literals;
 		SlowDown sd(100ms);
+		uint64_t processedStates = 0;
 
 		while (!queue.empty()) {
 			State current = queue.top();
 			queue.pop();
 			const BigState &currentState = states[current];
+			processedStates += currentState.size();
 
 			static WordSet<Letter>		 temporaryWords;	 // used for the new state delays
 			static std::vector<BigState> nextStates;
@@ -163,7 +165,9 @@ class SSFT {
 						if (this->output.contains(newIndex) &&
 							!std::ranges::equal(stateDelays[delayID], words[this->output[newIndex]])) {
 							if (!resolveNonFunctionality)
-								throw std::runtime_error("Non-functional transducer detected");
+								throw std::runtime_error(
+									std::format("Non-functionality detected at state {} between outputs {} and {}",
+												newIndex, stateDelays[delayID], words[this->output[newIndex]]));
 							else {
 								// try to resolve by choosing the output that ends in this state
 								assert(bestOutToKeep != -1ull);
@@ -203,11 +207,13 @@ class SSFT {
 				to = stateRemap[to];
 			}
 
-			// sd.do_thing([&]() {
-			//	std::cout << "\rCurrent max delay: " << curr_max;
-			//	std::cout << " Current states count: " << states.size() << " Upper bound: " << MAX_DELAY;
-			//	std::cout << " transitions: " << transitions.size() << std::flush;
-			// });
+			sd.do_thing([&]() {
+				std::cout << "\rCurrent max delay: " << curr_max;
+				std::cout << " Current states count: " << states.size() << " Upper bound: " << MAX_DELAY;
+				std::cout << " transitions: " << transitions.size() << std::flush;
+				std::cout << " Mean states in SSFT state: " << (double)processedStates / (double)states.size()
+						  << std::flush;
+			});
 
 			// if (curr_max >= 1) {
 			//	ShellProcess p("dot -Tsvg > a.svg && feh ./a.svg");
@@ -410,6 +416,17 @@ class SSFT {
 			}
 		}
 		return ssft;
+	}
+
+	void printInfo(std::ostream &out) const {
+		out << std::format("SSFT has {} states and {} transitions.\n", N, transitions.size());
+		out << std::format("Average transitions per state: {:.2f}\n", static_cast<double>(transitions.size()) / N);
+		std::map<State, int> transitionCount;
+		for (const auto &[_, value] : transitions) {
+			const auto &[_, to] = value;
+			transitionCount[to]++;
+		}
+		out << std::format("Number of final states: {}\n", qFinals.size());
 	}
 };
 
