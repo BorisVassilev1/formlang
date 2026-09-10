@@ -10,31 +10,31 @@
 #include "datastructures.hpp"
 
 namespace fl {
-template <isLetter Letter>
+template <symbol Symbol>
 class OutputFSA;
 
 // Subsequential Finite-State Transducer (SSFST)
-template <class Letter>
-class SSFT {
+template <symbol Symbol>
+class SparseSSFST {
    public:
 	using State	   = unsigned int;
-	using StringID = WordSet<Letter>::WordID;
-	using Map	   = fl::unordered_map<std::tuple<State, Letter>, std::pair<StringID, State>>;
-	using Letter_t = Letter;
+	using StringID = WordSet<Symbol>::WordID;
+	using Map	   = fl::unordered_map<std::tuple<State, Symbol>, std::pair<StringID, State>>;
+	using Letter_t = Symbol;
 
    private:
-	WordSet<Letter>					   words;
+	WordSet<Symbol>					   words;
 	Map								   transitions;
 	fl::unordered_set<State>		   qFinals;
 	unsigned int					   N = 0;
 	fl::unordered_map<State, StringID> output;
 
    public:
-	SSFT() = default;
+	SparseSSFST() = default;
 
 	// accepts a trimmed ExpandedFST and builds a subsequential finite-state transducer
 	// tests for bounded variation
-	SSFT(ExpandedFST<Letter> &&fsa, bool resolveNonFunctionality = false) {
+	SparseSSFST(ExpandedFST<Symbol> &&fsa, bool resolveNonFunctionality = false) {
 		unsigned int C = 0;
 		for (auto w : fsa.words) {
 			if (w.size() > C) C = w.size();
@@ -42,8 +42,8 @@ class SSFT {
 		auto MAX_DELAY = C * fsa.N * fsa.N;		// C * |Q|^2
 		auto curr_max  = 0u;
 
-		UniqueWordSet<Letter> stateDelays;
-		using DelayID = UniqueWordSet<Letter>::WordID;
+		UniqueWordSet<Symbol> stateDelays;
+		using DelayID = UniqueWordSet<Symbol>::WordID;
 
 		// We use vector because noone cares about individual states and delays
 		using BigState = std::vector<std::tuple<State, DelayID>>;
@@ -82,7 +82,7 @@ class SSFT {
 			const BigState &currentState = states[current];
 			processedStates += currentState.size();
 
-			static WordSet<Letter>		 temporaryWords;	 // used for the new state delays
+			static WordSet<Symbol>		 temporaryWords;	 // used for the new state delays
 			static std::vector<BigState> nextStates;
 			static std::vector<std::reference_wrapper<typename Map::value_type>>
 				  currentTransitions;	  // transitions for the current state
@@ -139,7 +139,7 @@ class SSFT {
 					}
 
 					auto new_id =
-						stateDelays.addWord((Letter *)&*wrongDelay.begin() + eaten, wrongDelay.size() - eaten);
+						stateDelays.addWord((Symbol *)&*wrongDelay.begin() + eaten, wrongDelay.size() - eaten);
 					delay_id = new_id;
 				}
 			}
@@ -216,14 +216,14 @@ class SSFT {
 				std::cout << "\rCurrent max delay: " << curr_max;
 				std::cout << " Current states count: " << states.size() << " Upper bound: " << MAX_DELAY;
 				std::cout << " transitions: " << transitions.size() << std::flush;
-				std::cout << " Mean states in SSFT state: " << (double)processedStates / (double)states.size()
+				std::cout << " Mean states in SparseSSFST state: " << (double)processedStates / (double)states.size()
 						  << std::flush;
 			});
 
 			// if (curr_max >= 1) {
 			//	ShellProcess p("dot -Tsvg > a.svg && feh ./a.svg");
 			//	auto		&in = p.in();
-			//	in << "digraph SSFT {\n";
+			//	in << "digraph SparseSSFST {\n";
 			//	in << "  rankdir=LR;\n";
 			//	in << "  node [shape=circle];\n";
 			//	in << "  init [label=\"N=" << states.size() << "\", shape=square];\n";
@@ -273,7 +273,7 @@ class SSFT {
 		if (N < 100) {
 			ShellProcess p("dot -Tsvg > a.svg && feh ./a.svg");
 			auto		&in = p.in();
-			in << "digraph SSFT {\n";
+			in << "digraph SparseSSFST {\n";
 			in << "  rankdir=LR;\n";
 			in << "  node [shape=circle];\n";
 			in << "  init [label=\"N=" << states.size() << "\", shape=square];\n";
@@ -316,22 +316,21 @@ class SSFT {
 
 	[[clang::always_inline]] inline std::size_t				size() const { return N; }
 	[[clang::always_inline]] inline State					initial() const { return 0; }
-	[[clang::always_inline]] inline std::span<const Letter> initialOutput() const { return words[0]; }
 	[[clang::always_inline]] inline bool					isFinal(State s) const { return qFinals.contains(s); }
-	[[clang::always_inline]] inline std::pair<std::span<const Letter>, bool> step(State &s, Letter l) const {
+	[[clang::always_inline]] inline std::pair<std::span<const Symbol>, bool> step(State &s, Symbol l) const {
 		auto it = transitions.find({s, l});
-		if (it == transitions.end()) return std::pair{std::span<const Letter>{}, false};
+		if (it == transitions.end()) return std::pair{std::span<const Symbol>{}, false};
 		const auto &[outputID, next] = it->second;
 		s							 = next;
-		return std::pair{std::span<const Letter>(words[outputID]), true};
+		return std::pair{std::span<const Symbol>(words[outputID]), true};
 	}
-	[[clang::always_inline]] inline std::span<const Letter> psi(State s) const {
-		if (!qFinals.contains(s)) return std::span<const Letter>{};
-		return std::span<const Letter>(words[output.at(s)]);
+	[[clang::always_inline]] inline std::span<const Symbol> psi(State s) const {
+		if (!qFinals.contains(s)) return std::span<const Symbol>{};
+		return std::span<const Symbol>(words[output.at(s)]);
 	}
 
-	auto f(const std::vector<Letter> &input) const {
-		std::vector<Letter> output;
+	auto f(const std::vector<Symbol> &input) const {
+		std::vector<Symbol> output;
 		State				current = 0;	 // initial state
 		for (const auto &letter : input) {
 			auto it = transitions.find({current, letter});
@@ -348,7 +347,7 @@ class SSFT {
 	}
 
 	void print(std::ostream &out) const {
-		out << "digraph SSFT {\n";
+		out << "digraph SparseSSFST {\n";
 		out << "  rankdir=LR;\n";
 		out << "  node [shape=circle];\n";
 		out << "  init [label=\"N=" << N << "\", shape=square];\n";
@@ -377,19 +376,19 @@ class SSFT {
 	}
 
 	template <std::size_t N, std::size_t Transitions>
-	struct PackedSSFTInputOnly {
+	struct PackedSparseSSFSTInputOnly {
 		std::array<std::tuple<uint8_t, uint16_t, uint8_t>, Transitions> transitions_list;
-		std::array<Letter, N>											output;
+		std::array<Symbol, N>											output;
 		State															first;
 
-		constexpr PackedSSFTInputOnly() : transitions_list{}, output{'\0'}, first(0) {}
+		constexpr PackedSparseSSFSTInputOnly() : transitions_list{}, output{'\0'}, first(0) {}
 
 		void write(std::ostream &out) const {
 			out << "#include <cstdint>\n";
-			out << "#define SSFT_INCLUDED\n";
+			out << "#define SparseSSFST_INCLUDED\n";
 			out << "constexpr uint64_t packed_ssft[] = {\n";
 			const uint64_t *data = reinterpret_cast<const uint64_t *>(this);
-			for (std::size_t i = 0; i < sizeof(PackedSSFTInputOnly) / sizeof(uint64_t); ++i) {
+			for (std::size_t i = 0; i < sizeof(PackedSparseSSFSTInputOnly) / sizeof(uint64_t); ++i) {
 				out << "0x" << std::hex << data[i] << std::dec << "ULL,";
 			}
 			out << "};\n";
@@ -397,12 +396,12 @@ class SSFT {
 	};
 
 	template <std::size_t N, std::size_t T>
-	constexpr PackedSSFTInputOnly<N, T> packInputOnly() const {
-		if (N != this->N) { dbLog(dbg::LOG_ERROR, "SSFT::packInputOnly: N mismatch: ", N, " != ", this->N); }
+	constexpr PackedSparseSSFSTInputOnly<N, T> packInputOnly() const {
+		if (N != this->N) { dbLog(dbg::LOG_ERROR, "SparseSSFST::packInputOnly: N mismatch: ", N, " != ", this->N); }
 		if (T != this->transitions.size()) {
-			dbLog(dbg::LOG_ERROR, "SSFT::packInputOnly: Transitions mismatch: ", T, " != ", this->transitions.size());
+			dbLog(dbg::LOG_ERROR, "SparseSSFST::packInputOnly: Transitions mismatch: ", T, " != ", this->transitions.size());
 		}
-		PackedSSFTInputOnly<N, T> packed;
+		PackedSparseSSFSTInputOnly<N, T> packed;
 		packed.first	  = 0;
 		std::size_t index = 0;
 		for (const auto &[lhs, rhs] : transitions) {
@@ -414,33 +413,33 @@ class SSFT {
 			if (qFinals.contains(State(s))) {
 				packed.output[s] = words[output.at(State(s))][0];
 			} else {
-				packed.output[s] = Letter::eof;
+				packed.output[s] = Symbol::eof;
 			}
 		}
 		return packed;
 	}
 
 	template <std::size_t N, std::size_t T>
-	static auto loadPackedInputOnly(const PackedSSFTInputOnly<N, T> &packed) {
-		SSFT<Letter> ssft;
+	static auto loadPackedInputOnly(const PackedSparseSSFSTInputOnly<N, T> &packed) {
+		SparseSSFST<Symbol> ssft;
 		ssft.N = 0;
 		for (const auto &trans : packed.transitions_list) {
 			const auto &[from, letter, to]			 = trans;
-			ssft.transitions[{from, Letter(letter)}] = {0, to};
+			ssft.transitions[{from, Symbol(letter)}] = {0, to};
 			if (from >= ssft.N) ssft.N = from + 1;
 			if (to >= ssft.N) ssft.N = to + 1;
 		}
 		for (std::size_t s = 0; s < N; ++s) {
-			if (packed.output[s] != Letter::eof) {
+			if (packed.output[s] != Symbol::eof) {
 				ssft.qFinals.insert(State(s));
-				ssft.output[State(s)] = ssft.words.addWord(std::array<Letter, 1>{packed.output[s]});
+				ssft.output[State(s)] = ssft.words.addWord(std::array<Symbol, 1>{packed.output[s]});
 			}
 		}
 		return ssft;
 	}
 
 	void printInfo(std::ostream &out) const {
-		out << std::format("SSFT has {} states and {} transitions.\n", N, transitions.size());
+		out << std::format("SparseSSFST has {} states and {} transitions.\n", N, transitions.size());
 		out << std::format("Average transitions per state: {:.2f}\n", static_cast<double>(transitions.size()) / N);
 		std::map<State, int> transitionCount;
 		for (const auto &[_, value] : transitions) {
@@ -452,11 +451,11 @@ class SSFT {
 		out << std::format("Words cache size: {}\n", words.totalLength());
 	}
 
-	friend class OutputFSA<Letter>;
+	friend class OutputFSA<Symbol>;
 };
 
-template <class Letter>
-void drawFSA(const SSFT<Letter> &fsa) {
+template <class Symbol>
+void drawFSA(const SparseSSFST<Symbol> &fsa) {
 	ShellProcess p("dot -Tsvg > a.svg && feh ./a.svg");
 	fsa.print(p.in());
 	p.in() << std::endl;
@@ -467,23 +466,23 @@ void drawFSA(const SSFT<Letter> &fsa) {
 	if (!err.empty()) std::cout << err << std::endl;
 }
 
-template <class Letter>
-void statFSA(const SSFT<Letter> &fsa) {
+template <class Symbol>
+void statFSA(const SparseSSFST<Symbol> &fsa) {
 	fsa.printInfo(std::cout);
 }
 
 }	  // namespace fl
 
 #include "letter.hpp"
-static_assert(fl::isSubSeqTransducer<fl::SSFT<fl::Letter>>,
-			  "SSFT does not satisfy the subsequential transducer concept");
+static_assert(fl::SSFST<fl::SparseSSFST<fl::Letter>>,
+			  "SparseSSFST does not satisfy the subsequential transducer concept");
 
 namespace fl {
 
 template <class Transducer>
-	requires isSubSeqTransducer<Transducer>
-class SSFTTraverser {
-	using Letter = typename Transducer::Letter_t;
+	requires (SSFST<Transducer> && !SSFSTI<Transducer>)
+class SSFSTTraverser {
+	using Symbol = typename Transducer::Letter_t;
 	using State	 = typename Transducer::State;
 
 	const Transducer &ssft;
@@ -491,7 +490,7 @@ class SSFTTraverser {
    public:
 	State current;
 
-	SSFTTraverser(const Transducer &ssft) : ssft(ssft), current(0) {}
+	SSFSTTraverser(const Transducer &ssft) : ssft(ssft), current(0) {}
 
 	template <std::ranges::input_range R>
 	auto traverseOutputOnlyUntilCan(R &&input) {
@@ -502,12 +501,12 @@ class SSFTTraverser {
 		}
 		if (ssft.isFinal(current)) {
 			return ssft.psi(current);
-		} else return std::span<const Letter>{};
+		} else return std::span<const Symbol>{};
 	}
 
 	template <class Iterator, class Sentinel>
-	std::pair<std::optional<Letter>, int> traverseOutputOnlyUntilCan(Iterator &begin, Sentinel &&end) {
-		current = 0;
+	std::pair<std::optional<Symbol>, int> traverseOutputOnlyUntilCan(Iterator &begin, Sentinel &&end) {
+		current = ssft.initial();
 		int len = 0;
 		for (; begin != end; ++begin) {
 			auto [out_span, ok] = step(*begin);

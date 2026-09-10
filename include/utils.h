@@ -13,11 +13,15 @@ class RangeFromPair {
 	T range;
 
    public:
-	RangeFromPair(const T &range) : range(range) {}
+	template <class U>
+	RangeFromPair(U &&range) : range(std::forward<U>(range)) {}
 
 	auto begin() { return range.first; }
 	auto end() { return range.second; }
 };
+
+template <class T>
+RangeFromPair(T &&range) -> RangeFromPair<T>;
 
 #define JOB(name, ...)                     \
 	static int _job_##name = []() -> int { \

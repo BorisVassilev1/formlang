@@ -106,6 +106,9 @@ struct Token {
 // static_assert(Token::unique_id() == 259);
 
 std::ostream &operator<<(std::ostream &out, const Token &v);
+
+static_assert(fl::symbol<fl::Token>, "fl::Token does not satisfy isLetter concept");
+
 }	  // namespace fl
 template <>
 struct std::formatter<fl::Token> : fl::ostream_formatter {};

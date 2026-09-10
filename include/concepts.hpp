@@ -8,9 +8,9 @@
 
 namespace fl {
 
-/// a concept for classes that can be Letter in a DPDA<State, Letter>
+/// a concept for classes that can be Symbol in a DPDA<State, Symbol>
 template <class L>
-concept isLetter = requires() {
+concept symbol = requires() {
 	{ L::eps } -> std::same_as<const L &>;
 	{ L::eof } -> std::same_as<const L &>;
 	{ L::size } -> std::convertible_to<const std::size_t &>;
@@ -20,9 +20,9 @@ concept isLetter = requires() {
 	not std::is_fundamental_v<L>;
 };
 
-/// a concept for classes that can be State in a DPDA<State, Letter>
+/// a concept for classes that can be State in a DPDA<State, Symbol>
 template <class S>
-concept isState = requires(std::size_t i) {
+concept state = requires(std::size_t i) {
 	std::is_convertible_v<S, std::size_t>;
 	{ new S(i) };
 	{ new S() };
@@ -32,20 +32,20 @@ concept isState = requires(std::size_t i) {
 template <int N, typename... Ts>
 using NthTypeOf = typename std::tuple_element<N, std::tuple<Ts...>>::type;
 
-template <isLetter Letter, std::ranges::viewable_range T>
-std::vector<Letter> toLetter(T &&t) {
-	return std::vector<Letter>(std::begin(t), std::end(t));
+template <symbol Symbol, std::ranges::viewable_range T>
+std::vector<Symbol> toSymbol(T &&t) {
+	return std::vector<Symbol>(std::begin(t), std::end(t));
 }
 
-template <isLetter Letter>
-std::vector<Letter> toLetter(const char *s) {
-	return toLetter<Letter>(std::string_view(s));
+template <symbol Symbol>
+std::vector<Symbol> toSymbol(const char *s) {
+	return toSymbol<Symbol>(std::string_view(s));
 }
 
 template <class T>
-concept isSSFST =						  //
-	isLetter<typename T::Letter_t> &&	  //
-	isState<typename T::State> &&		  //
+concept SSFST =							//
+	symbol<typename T::Letter_t> &&		//
+	state<typename T::State> &&			//
 	requires(T t, typename T::Letter_t l, T::State s) {
 		{
 			&T::step
@@ -58,7 +58,7 @@ concept isSSFST =						  //
 	};
 
 template <class T>
-concept isSSFSTI = isSSFST<T> && requires(T t) {
+concept SSFSTI = SSFST<T> && requires(T t) {
 	{ &T::initialOutput } -> std::same_as<std::span<const typename T::Letter_t> (T::*)() const>;
 };
 

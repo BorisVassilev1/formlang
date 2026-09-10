@@ -20,8 +20,7 @@ namespace fl {
  * @tparam State - type of the states
  * @tparam Letter - type of the Symbols in the alphabet
  */
-template <class State = std::size_t, class Letter = char>
-	requires isState<State> && isLetter<Letter>
+template <state State = std::size_t, symbol Letter = char>
 class DPDA {
    public:
 	using Production = typename CFG<Letter>::Production;

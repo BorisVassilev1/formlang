@@ -34,8 +34,8 @@ auto w_noref(U &&u, V &&v, W &&alpha, X &&beta) {
 	auto u_alpha = std::views::concat(u, alpha);
 	auto v_beta	 = std::views::concat(v, beta);
 	auto c		 = commonPrefix(u_alpha, v_beta);
-	return std::tuple(toLetter<Letter>(remainderSuffix(c, std::move(u_alpha))),
-					  toLetter<Letter>(remainderSuffix(c, std::move(v_beta))));
+	return std::tuple(toSymbol<Letter>(remainderSuffix(c, std::move(u_alpha))),
+					  toSymbol<Letter>(remainderSuffix(c, std::move(v_beta))));
 }
 
 template <class U, class V>
@@ -176,7 +176,7 @@ bool isFunctional(const ExpandedFST<Letter> &fst) {
 			if (functional) {
 				if (q2_it == Adm.end()) {
 					queue.push(q2);
-					Adm.insert({{i, j}, {toLetter<Letter>(h_1), toLetter<Letter>(h_2)}});
+					Adm.insert({{i, j}, {toSymbol<Letter>(h_1), toSymbol<Letter>(h_2)}});
 				}
 			} else {
 				std::cout << "-> \"" << toString(h_1) << "\", \"" << toString(h_2) << "\"" << std::endl;
@@ -341,7 +341,7 @@ bool testBoundedVariation(const ExpandedFST<Letter> &fst) {
 
 			if (boundedVariation) {
 				// if (q2_it == Adm.end()) queue.push(q2);
-				auto [inserted_it, b] = Adm.insert({{i, j}, {toLetter<Letter>(h_1), toLetter<Letter>(h_2)}});
+				auto [inserted_it, b] = Adm.insert({{i, j}, {toSymbol<Letter>(h_1), toSymbol<Letter>(h_2)}});
 				if (b) [[likely]]
 					queue.emplace(std::ref(*inserted_it));
 

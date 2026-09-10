@@ -1,16 +1,17 @@
 #pragma once
 
 #include <cstdio>
+#include <functional>
 #include <iterator>
 #include <ranges>
-#include <string>
-#include "SSFT.hpp"
-#include "debug.hpp"
-#include "token.h"
+#include <istream>
+#include <map>
+
+#include <concepts.hpp>
 
 namespace fl {
-template <isLetter Letter>
-class CharInputStream : public std::ranges::view_interface<CharInputStream<Letter>> {
+template <symbol Symbol>
+class CharInputStream : public std::ranges::view_interface<CharInputStream<Symbol>> {
    public:
 	std::istream *input_stream = nullptr;
 
@@ -26,13 +27,13 @@ class CharInputStream : public std::ranges::view_interface<CharInputStream<Lette
 	class iterator {
 	   public:
 		using iterator_category = std::input_iterator_tag;
-		using value_type		= Letter;
+		using value_type		= Symbol;
 		using difference_type	= std::ptrdiff_t;
-		using pointer			= Letter *;
-		using reference			= Letter;
+		using pointer			= Symbol *;
+		using reference			= Symbol;
 
 		std::istream *input_stream;
-		Letter		  current_char = Letter::eps;
+		Symbol		  current_char = Symbol::eps;
 		bool		  end_reached  = false;
 
 		iterator(std::istream *input_stream) : input_stream(input_stream) { ++*this; }
@@ -47,12 +48,12 @@ class CharInputStream : public std::ranges::view_interface<CharInputStream<Lette
 
 		iterator &operator++() {
 			int ch		= input_stream->get();
-			end_reached = (current_char == Letter::eof);
+			end_reached = (current_char == Symbol::eof);
 
 			if (input_stream->eof()) {
-				current_char = Letter::eof;
+				current_char = Symbol::eof;
 			} else {
-				current_char = Letter((char)ch);
+				current_char = Symbol((char)ch);
 			}
 			return *this;
 		}
@@ -62,7 +63,7 @@ class CharInputStream : public std::ranges::view_interface<CharInputStream<Lette
 			return temp;
 		}
 
-		Letter operator*() const { return current_char; }
+		Symbol operator*() const { return current_char; }
 	};
 	struct sentinel {
 		bool operator==(const iterator &it) const { return it.end_reached; }
@@ -72,39 +73,48 @@ class CharInputStream : public std::ranges::view_interface<CharInputStream<Lette
 	iterator begin() { return iterator(input_stream); }
 	sentinel end() { return sentinel{}; }
 };
+}	  // namespace fl
 
-static_assert(std::sentinel_for<CharInputStream<Token>::sentinel, CharInputStream<Token>::iterator>);
-static_assert(std::ranges::viewable_range<CharInputStream<Token>>);
-static_assert(std::ranges::input_range<CharInputStream<Token>>);
+#include "letter.hpp"
 
-template <class Token, std::ranges::input_range Range>
-	requires std::convertible_to<std::ranges::range_value_t<Range>, Token>
-class LexerRange : public std::ranges::view_interface<LexerRange<Token, Range>> {
+static_assert(std::sentinel_for<fl::CharInputStream<fl::Letter>::sentinel, fl::CharInputStream<fl::Letter>::iterator>);
+static_assert(std::ranges::viewable_range<fl::CharInputStream<fl::Letter>>);
+static_assert(std::ranges::input_range<fl::CharInputStream<fl::Letter>>);
+
+namespace fl {
+
+template <SSFST T, std::ranges::input_range Range>
+	requires(!SSFSTI<T> && std::convertible_to<std::ranges::range_value_t<Range>, typename T::Letter_t>)
+class LexerRange : public std::ranges::view_interface<LexerRange<T, Range>> {
+	using State	 = typename T::State;
+	using Symbol = typename T::Letter_t;
+
+	using This = LexerRange<T, Range>;
+
    public:
 	using InnerIterator = decltype(std::ranges::begin(std::declval<Range &>()));
 	using InnerSentinel = decltype(std::ranges::end(std::declval<Range &>()));
 
-	Range			  *range;
-	const SSFT<Token> &ssft;
-	Token			   error_token;
+	Range	*range;
+	const T &ssft;
+	Symbol	 error_token;
 
-	LexerRange(Range &range, const SSFT<Token> &ssft, Token error_token)
-		: range(&range), ssft(ssft), error_token(error_token) {}
+	LexerRange(Range &range, const T &ssft, Symbol error_token) : range(&range), ssft(ssft), error_token(error_token) {}
 
 	class iterator {
 	   public:
-		InnerIterator			  current;
-		InnerSentinel			  end;
-		SSFT<Token>::State		  current_state;
-		LexerRange<Token, Range> *lex_ptr;
-		std::size_t				  position;
-		std::size_t				  output_position;
-		std::size_t				  line_number = 1;
-		mutable bool			  consumed	  = false;
-		std::vector<Token>		  buffer;
-		mutable Token			  queued_token = Token::eps;
+		InnerIterator		current;
+		InnerSentinel		end;
+		State				current_state;
+		This			   *lex_ptr;
+		std::size_t			position;
+		std::size_t			output_position;
+		std::size_t			line_number = 1;
+		mutable bool		consumed	= false;
+		std::vector<Symbol> buffer;
+		mutable Symbol		queued_token = Symbol::eps;
 
-		iterator(InnerIterator &&begin, InnerSentinel &&end, LexerRange<Token, Range> *lex_ptr)
+		iterator(InnerIterator &&begin, InnerSentinel &&end, This *lex_ptr)
 			: current(std::move(begin)),
 			  end(std::move(end)),
 			  current_state(0),
@@ -127,8 +137,8 @@ class LexerRange : public std::ranges::view_interface<LexerRange<Token, Range>> 
 				auto [output, success] = ssft_ptr->step(current_state, *current);
 				if (!success) {
 					if (ssft_ptr->isFinal(current_state)) {
-						Token output = ssft_ptr->psi(current_state)[0];
-						auto  it	 = lex_ptr->skippers.find(output);
+						Symbol output = ssft_ptr->psi(current_state)[0];
+						auto   it	  = lex_ptr->skippers.find(output);
 						if (it != lex_ptr->skippers.end()) {
 							auto skipper  = it->second;
 							auto [len, t] = skipper(*this);
@@ -155,39 +165,39 @@ class LexerRange : public std::ranges::view_interface<LexerRange<Token, Range>> 
 		}
 
 		struct TokenData {
-			Token				   token;
-			std::size_t			   from;
-			std::size_t			   to;
-			std::size_t			   line;
-			std::span<const Token> str;
+			Symbol					token;
+			std::size_t				from;
+			std::size_t				to;
+			std::size_t				line;
+			std::span<const Symbol> str;
 		};
 
 		TokenData operator*() const {
 			consumed = true;
-			if (queued_token != Token::eps) {
+			if (queued_token != Symbol::eps) {
 				auto t		 = queued_token;
-				queued_token = Token::eps;
+				queued_token = Symbol::eps;
 				return TokenData{t, output_position, position - 1, line_number,
 								 std::span(buffer.begin(), buffer.end())};
 			}
 			if (lex_ptr->ssft.isFinal(current_state)) {
-				return TokenData{lex_ptr->ssft.psi(current_state)[0], output_position,
-								 position - 1, line_number, std::span(buffer.begin(), buffer.end())};
+				return TokenData{lex_ptr->ssft.psi(current_state)[0], output_position, position - 1, line_number,
+								 std::span(buffer.begin(), buffer.end())};
 			} else {
 				return TokenData{lex_ptr->error_token, output_position, position - 1, line_number,
 								 std::span(buffer.begin(), buffer.end())};
 			}
 		}
 	};
-	using SkipperFunction = std::function<std::tuple<size_t, Token>(iterator &it)>;
-	std::map<Token, SkipperFunction> skippers;
-	void							 attachSkipper(Token token, SkipperFunction skipper) { skippers[token] = skipper; }
+	using SkipperFunction = std::function<std::tuple<size_t, Symbol>(iterator &it)>;
+	std::map<Symbol, SkipperFunction> skippers;
+	void attachSkipper(Symbol token, SkipperFunction skipper) { skippers[token] = skipper; }
 
 	iterator begin() { return iterator(std::ranges::begin(*range), std::ranges::end(*range), this); }
 	auto	 end() { return std::ranges::end(*range); };
 };
 
-template <class Token, std::ranges::input_range Range>
-LexerRange(Range &, const SSFT<Token> &, Token) -> LexerRange<Token, Range>;
+template <SSFST T, std::ranges::input_range Range, symbol Symbol>
+LexerRange(Range &, const T &, Symbol) -> LexerRange<T, Range>;
 
 }	  // namespace fl

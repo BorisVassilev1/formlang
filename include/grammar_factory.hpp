@@ -13,53 +13,56 @@ using fl::Production;
 using fl::unordered_map;
 using fl::unordered_set;
 
-template <class _Letter>
-class LL1Grammar : public CFG<_Letter> {
+template <class _Symbol>
+class LL1Grammar : public CFG<_Symbol> {
    public:
-	LL1Grammar(const _Letter &start) : CFG<_Letter>(start, _Letter::eof) {}
+	LL1Grammar(const _Symbol &start) : CFG<_Symbol>(start, _Symbol::eof) {}
 };
 
-template <class _Letter, class G>
-concept is_grammar = std::is_base_of_v<LL1Grammar<_Letter>, std::remove_cvref_t<G>>;
+template <class _Symbol, class G>
+concept grammar = std::is_base_of_v<LL1Grammar<_Symbol>, std::remove_cvref_t<G>>;
 
-template <class _Letter, class G>
-concept is_letter = std::is_same_v<_Letter, std::remove_cvref_t<G>>;
+template <class _Symbol, class G>
+concept single_symbol = std::is_same_v<_Symbol, std::remove_cvref_t<G>>;
 
-template <class _Letter, class G>
-concept is_word = std::is_same_v<std::vector<_Letter>, std::remove_cvref_t<G>> ||
-				  std::is_same_v<Production<_Letter>, std::remove_cvref_t<G>>;
+template <class _Symbol, class G>
+concept single_word = std::is_same_v<std::vector<_Symbol>, std::remove_cvref_t<G>> ||
+					  std::is_same_v<Production<_Symbol>, std::remove_cvref_t<G>>;
 
-template <class _Letter>
-class Epsilon : public LL1Grammar<_Letter> {
+template <class _Symbol, class G>
+concept convertible_to_subgrammar = grammar<_Symbol, G> || single_symbol<_Symbol, G> || single_word<_Symbol, G>;
+
+template <class _Symbol>
+class Epsilon : public LL1Grammar<_Symbol> {
    public:
-	Epsilon(const _Letter &start) : LL1Grammar<_Letter>(start) {
-		this->addRule(start, Production<_Letter>({}, {}, false));
+	Epsilon(const _Symbol &start) : LL1Grammar<_Symbol>(start) {
+		this->addRule(start, Production<_Symbol>({}, {}, false));
 	}
 };
 
-template <class _Letter>
-class Word : public LL1Grammar<_Letter> {
+template <class _Symbol>
+class Word : public LL1Grammar<_Symbol> {
    public:
-	Word(const _Letter &start, const std::vector<_Letter> &word, const std::vector<bool> &ignore, bool spill = false)
-		: LL1Grammar<_Letter>(start) {
+	Word(const _Symbol &start, const std::vector<_Symbol> &word, const std::vector<bool> &ignore, bool spill = false)
+		: LL1Grammar<_Symbol>(start) {
 		this->terminals.insert(word.begin(), word.end());
-		this->addRule(start, Production<_Letter>(word, ignore));
+		this->addRule(start, Production<_Symbol>(word, ignore));
 		if (spill) this->getNonTerminalData(start).upwardSpillThreshold = INT_MAX;
 	}
-	Word(const _Letter &start, const std::vector<_Letter> &word, bool spill = false)
+	Word(const _Symbol &start, const std::vector<_Symbol> &word, bool spill = false)
 		: Word(start, word, std::vector<bool>(word.size(), false), spill) {}
 };
 
-template <class _Letter>
-class Optional : public LL1Grammar<_Letter> {
+template <class _Symbol>
+class Optional : public LL1Grammar<_Symbol> {
    public:
 	template <typename G>
-		requires(is_grammar<_Letter, G> || is_letter<_Letter, G> || is_word<_Letter, G>)
-	Optional(const _Letter &start, G &&g) : LL1Grammar<_Letter>(start) {
-		if constexpr (is_letter<_Letter, G>) {
+		requires convertible_to_subgrammar<_Symbol, G>
+	Optional(const _Symbol &start, G &&g) : LL1Grammar<_Symbol>(start) {
+		if constexpr (single_symbol<_Symbol, G>) {
 			this->terminals.insert(g);
-			this->addRule(start, {_Letter(g)});
-		} else if constexpr (is_word<_Letter, G>) {
+			this->addRule(start, {_Symbol(g)});
+		} else if constexpr (single_word<_Symbol, G>) {
 			this->terminals.insert(g.begin(), g.end());
 			this->addRule(start, g);
 		} else {
@@ -75,15 +78,15 @@ class Optional : public LL1Grammar<_Letter> {
 	}
 };
 
-template <class _Letter>
-class Seq : public LL1Grammar<_Letter> {
+template <class _Symbol>
+class Seq : public LL1Grammar<_Symbol> {
    public:
 	template <typename... Grammars>
-		requires((is_grammar<_Letter, Grammars> || is_letter<_Letter, Grammars>) && ...)
-	Seq(const _Letter &start, std::vector<bool> ignore, Grammars &&...gs) : LL1Grammar<_Letter>(start) {
+		requires((grammar<_Symbol, Grammars> || single_symbol<_Symbol, Grammars>) && ...)
+	Seq(const _Symbol &start, std::vector<bool> ignore, Grammars &&...gs) : LL1Grammar<_Symbol>(start) {
 		assert(sizeof...(gs) == ignore.size() && "Ignore vector size must match number of grammars");
-		auto params = std::vector<_Letter>{[&]() {
-			if constexpr (is_letter<_Letter, Grammars>) {
+		auto params = std::vector<_Symbol>{[&]() {
+			if constexpr (single_symbol<_Symbol, Grammars>) {
 				this->terminals.insert(gs);
 				return gs;
 			} else {
@@ -99,24 +102,24 @@ class Seq : public LL1Grammar<_Letter> {
 	}
 
 	template <typename... Grammars>
-		requires((is_grammar<_Letter, Grammars> || is_letter<_Letter, Grammars>) && ...)
-	Seq(const _Letter &start, Grammars &&...gs)
+		requires((grammar<_Symbol, Grammars> || single_symbol<_Symbol, Grammars>) && ...)
+	Seq(const _Symbol &start, Grammars &&...gs)
 		: Seq(start, std::vector<bool>(sizeof...(gs), false), std::forward<Grammars>(gs)...) {}
 };
 
-template <class _Letter>
-class Choice : public LL1Grammar<_Letter> {
+template <class _Symbol>
+class Choice : public LL1Grammar<_Symbol> {
    public:
 	template <typename... Grammars>
-		requires((is_grammar<_Letter, Grammars> || is_letter<_Letter, Grammars> || is_word<_Letter, Grammars>) && ...)
-	Choice(const _Letter &start, Grammars &&...gs) : LL1Grammar<_Letter>(start) {
+		requires(convertible_to_subgrammar<_Symbol, Grammars> && ...)
+	Choice(const _Symbol &start, Grammars &&...gs) : LL1Grammar<_Symbol>(start) {
 		static_assert(sizeof...(gs) > 0, "Choice must have at least one grammar");
 		(
 			[&]() {
-				if constexpr (is_letter<_Letter, Grammars>) {
+				if constexpr (single_symbol<_Symbol, Grammars>) {
 					this->terminals.insert(gs);
-					this->addRule(start, {_Letter(gs)});
-				} else if constexpr (is_word<_Letter, Grammars>) {
+					this->addRule(start, {_Symbol(gs)});
+				} else if constexpr (single_word<_Symbol, Grammars>) {
 					this->terminals.insert(gs.begin(), gs.end());
 					this->addRule(start, gs);
 				} else {
@@ -131,16 +134,16 @@ class Choice : public LL1Grammar<_Letter> {
 	}
 };
 
-template <class _Letter>
-class Repeat : public LL1Grammar<_Letter> {
+template <class _Symbol>
+class Repeat : public LL1Grammar<_Symbol> {
    public:
 	template <typename G>
-		requires(is_grammar<_Letter, G> || is_letter<_Letter, G> || is_word<_Letter, G>)
-	Repeat(const _Letter &start, G &&g, int spillThreshold = -1) : LL1Grammar<_Letter>(start) {
-		if constexpr (std::is_same_v<_Letter, std::remove_cvref_t<G>>) {
+		requires convertible_to_subgrammar<_Symbol, G>
+	Repeat(const _Symbol &start, G &&g, int spillThreshold = -1) : LL1Grammar<_Symbol>(start) {
+		if constexpr (std::is_same_v<_Symbol, std::remove_cvref_t<G>>) {
 			this->terminals.insert(g);
-			this->addRule(start, {_Letter(g), start});
-		} else if constexpr (is_word<_Letter, G>) {
+			this->addRule(start, {_Symbol(g), start});
+		} else if constexpr (single_word<_Symbol, G>) {
 			this->terminals.insert(g.begin(), g.end());
 			auto word = g;
 			word.push_back(start);
@@ -157,19 +160,19 @@ class Repeat : public LL1Grammar<_Letter> {
 	}
 };
 
-template <class _Letter>
-class RepeatChoice : public LL1Grammar<_Letter> {
+template <class _Symbol>
+class RepeatChoice : public LL1Grammar<_Symbol> {
    public:
 	template <typename... Grammars>
-		requires((is_grammar<_Letter, Grammars> || is_letter<_Letter, Grammars> || is_word<_Letter, Grammars>) && ...)
-	RepeatChoice(const _Letter &start, int spillThreshold, Grammars &&...gs) : LL1Grammar<_Letter>(start) {
+		requires(convertible_to_subgrammar<_Symbol, Grammars> && ...)
+	RepeatChoice(const _Symbol &start, int spillThreshold, Grammars &&...gs) : LL1Grammar<_Symbol>(start) {
 		static_assert(sizeof...(gs) > 0, "RepeatChoice must have at least one grammar");
 		(
 			[&]() {
-				if constexpr (is_letter<_Letter, Grammars>) {
+				if constexpr (single_symbol<_Symbol, Grammars>) {
 					this->terminals.insert(gs);
-					this->addRule(start, {_Letter(gs), start});
-				} else if constexpr (is_word<_Letter, Grammars>) {
+					this->addRule(start, {_Symbol(gs), start});
+				} else if constexpr (single_word<_Symbol, Grammars>) {
 					this->terminals.insert(gs.begin(), gs.end());
 					auto word = gs;
 					word.push_back(start);
@@ -188,16 +191,17 @@ class RepeatChoice : public LL1Grammar<_Letter> {
 	}
 
 	template <typename... Grammars>
-		requires((is_grammar<_Letter, Grammars> || is_letter<_Letter, Grammars> || is_word<_Letter, Grammars>) && ...)
-	RepeatChoice(const _Letter &start, Grammars &&...gs) : RepeatChoice(start, -1, std::forward<Grammars>(gs)...) {}
+		requires((grammar<_Symbol, Grammars> || single_symbol<_Symbol, Grammars> || single_word<_Symbol, Grammars>) &&
+				 ...)
+	RepeatChoice(const _Symbol &start, Grammars &&...gs) : RepeatChoice(start, -1, std::forward<Grammars>(gs)...) {}
 };
 
-template <class _Letter>
-class Combine : public LL1Grammar<_Letter> {
+template <class _Symbol>
+class Combine : public LL1Grammar<_Symbol> {
    public:
 	template <class StartGrammar, class... Grammars>
-		requires(is_grammar<_Letter, Grammars> && ...)
-	Combine(StartGrammar &&startGrammar, Grammars &&...gs) : LL1Grammar<_Letter>(startGrammar.start) {
+		requires(grammar<_Symbol, Grammars> && ...)
+	Combine(StartGrammar &&startGrammar, Grammars &&...gs) : LL1Grammar<_Symbol>(startGrammar.start) {
 		this->terminals.insert(startGrammar.terminals.begin(), startGrammar.terminals.end());
 		this->nonTerminals.insert(startGrammar.nonTerminals.begin(), startGrammar.nonTerminals.end());
 		this->nonTerminalData.insert(startGrammar.nonTerminalData.begin(), startGrammar.nonTerminalData.end());
@@ -209,13 +213,13 @@ class Combine : public LL1Grammar<_Letter> {
 		(this->rules.insert(gs.rules.begin(), gs.rules.end()), ...);
 
 		this->terminals = this->terminals |
-						  std::views::filter([this](const _Letter &l) { return !this->nonTerminals.contains(l); }) |
-						  std::ranges::to<unordered_set<_Letter>>();
+						  std::views::filter([this](const _Symbol &l) { return !this->nonTerminals.contains(l); }) |
+						  std::ranges::to<unordered_set<_Symbol>>();
 	}
 };
 
-template <class _Letter, class... Grammars>
-Combine(LL1Grammar<_Letter> &&, Grammars &&...) -> Combine<_Letter>;
-template <class _Letter, class... Grammars>
-Combine(const LL1Grammar<_Letter> &, Grammars &&...) -> Combine<_Letter>;
+template <class _Symbol, class... Grammars>
+Combine(LL1Grammar<_Symbol> &&, Grammars &&...) -> Combine<_Symbol>;
+template <class _Symbol, class... Grammars>
+Combine(const LL1Grammar<_Symbol> &, Grammars &&...) -> Combine<_Symbol>;
 };	   // namespace ll1g

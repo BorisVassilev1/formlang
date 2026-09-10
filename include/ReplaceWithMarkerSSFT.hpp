@@ -18,26 +18,26 @@ namespace fl {
 // contexts.
 //
 // the transducer is total, so every state has transitions with each letter.
-template <fl::isLetter Letter, size_t alphabetSize = Letter::size>
-class ReplaceWithMarkerSSFT : public TotalSSFT<Letter, alphabetSize> {
+template <fl::symbol Symbol, size_t alphabetSize = Symbol::size>
+class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize> {
    public:
 	using State		 = unsigned int;
-	using WordID	 = UniqueWordSet<Letter>::WordID;
-	using Map		 = TotalSSFT<Letter, alphabetSize>::Map;
-	using Transition = TotalSSFT<Letter, alphabetSize>::Transition;
+	using WordID	 = UniqueWordSet<Symbol>::WordID;
+	using Map		 = TotalSSFT<Symbol, alphabetSize>::Map;
+	using Transition = TotalSSFT<Symbol, alphabetSize>::Transition;
 
 	/// @brief A rule _<left>_<right>_ -> _<left><right>_
 	struct Rule {
-		std::vector<Letter> left;
-		std::vector<Letter> right;
+		std::vector<Symbol> left;
+		std::vector<Symbol> right;
 	};
 
 	struct RuleMetadata {
-		std::vector<Letter> match;
+		std::vector<Symbol> match;
 		size_t				markerIndex;
 		WordID				rightHalfID;
 
-		RuleMetadata(Rule &&rule, const Letter &marker, UniqueWordSet<Letter> &words)
+		RuleMetadata(Rule &&rule, const Symbol &marker, UniqueWordSet<Symbol> &words)
 			: match(std::move(rule.left)), markerIndex(match.size()) {
 			match.push_back(marker);
 			match.insert(match.end(), rule.right.begin(), rule.right.end());
@@ -53,17 +53,17 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Letter, alphabetSize> {
 												other.match.end() - 1);
 		}
 
-		WordID output(UniqueWordSet<Letter> &words, size_t offset) const {
+		WordID output(UniqueWordSet<Symbol> &words, size_t offset) const {
 			// assert(offset < match.size());
 			if (offset < markerIndex) return words.addWord(std::span{&match[offset], 1});
 			else return 0;	   // epsilon
 		}
-		WordID color(UniqueWordSet<Letter> &words) const {
+		WordID color(UniqueWordSet<Symbol> &words) const {
 			return words.addWord(std::span{match.begin() + markerIndex + 1, match.end()});
 		}
 
 		/// words must be the same as the one used to construct the RuleMetadata
-		WordID delay(UniqueWordSet<Letter> &words, size_t offset) const {
+		WordID delay(UniqueWordSet<Symbol> &words, size_t offset) const {
 			if (offset < markerIndex) return 0;
 			int	   len	  = std::max(0, (int)(offset - markerIndex));
 			WordID result = words.addSubWord(rightHalfID, 0, len);
@@ -72,13 +72,13 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Letter, alphabetSize> {
 	};
 
    private:
-	const Letter marker;
+	const Symbol marker;
 	bool		 minimize = true;
 
-	using TotalSSFT<Letter, alphabetSize>::N;
-	using TotalSSFT<Letter, alphabetSize>::transitions;
-	using TotalSSFT<Letter, alphabetSize>::output;
-	using TotalSSFT<Letter, alphabetSize>::words;
+	using TotalSSFT<Symbol, alphabetSize>::N;
+	using TotalSSFT<Symbol, alphabetSize>::transitions;
+	using TotalSSFT<Symbol, alphabetSize>::output;
+	using TotalSSFT<Symbol, alphabetSize>::words;
 
 	struct TemporaryStateData {
 		WordID								 color;
@@ -121,7 +121,7 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Letter, alphabetSize> {
 		std::vector<TemporaryStateData>							   unminimizedStates;	  /// treat as a stack
 		RuleMetadata											  *prevRuleMeta = nullptr;
 
-		UniqueWordSet<Letter> words;	  /// store the output words for each state in minimizedStates
+		UniqueWordSet<Symbol> words;	  /// store the output words for each state in minimizedStates
 		std::vector<WordID>	  delays;	  /// output for each state in minimizedStates
 
 		void newState(WordID color) {
@@ -149,7 +149,7 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Letter, alphabetSize> {
 	}
 
 	void fillFailTransitions(State initial, State trieStart, TemporaryData &tempData) {
-		for (Letter l = 0; l < Letter::size; ++l) {
+		for (Symbol l = 0; l < Symbol::size; ++l) {
 			if (l == marker) continue;
 			// self-loop for all letters except marker
 			transitions[initial][size_t(l)] = {words.addWord(std::span{&l, 1}), initial};
@@ -167,7 +167,7 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Letter, alphabetSize> {
 			visited[state] = true;
 			assert(fail[state] != -1u);
 
-			for (Letter l = 0; l < Letter::size; ++l) {
+			for (Symbol l = 0; l < Symbol::size; ++l) {
 				const auto &[outputID, next] = transitions[state][size_t(l)];
 				if (next != -1u) {
 					bfsQueue.push(next);
@@ -178,11 +178,11 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Letter, alphabetSize> {
 				} else {
 					State to						   = transitions[fail[state]][size_t(l)].next;
 					transitions[state][size_t(l)].next = to;
-					std::vector<Letter> failOutput;
+					std::vector<Symbol> failOutput;
 					// assert output[fail[state]].size() is a suffix of output[state].size()
 
-					std::span<const Letter> delayTo	   = tempData.words[tempData.delays[to]];
-					std::span<const Letter> delayState = tempData.words[tempData.delays[state]];
+					std::span<const Symbol> delayTo	   = tempData.words[tempData.delays[to]];
+					std::span<const Symbol> delayState = tempData.words[tempData.delays[state]];
 					int						cutoff	   = delayTo.size();
 					failOutput.insert(failOutput.end(), delayState.begin(), delayState.end() - std::max(0, cutoff - 1));
 					if (cutoff <= 0) failOutput.push_back(l);
@@ -192,7 +192,7 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Letter, alphabetSize> {
 		}
 	}
 
-	size_t longestCommonPrefix(std::span<const Letter> a, std::span<const Letter> b) const {
+	size_t longestCommonPrefix(std::span<const Symbol> a, std::span<const Symbol> b) const {
 		size_t len = std::min(a.size(), b.size());
 		for (size_t i = 0; i < len; ++i) {
 			if (a[i] != b[i]) return i;
@@ -256,7 +256,7 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Letter, alphabetSize> {
 	}
 
    public:
-	ReplaceWithMarkerSSFT(std::vector<Rule> &&rules, const Letter &marker, bool minimize = true)
+	ReplaceWithMarkerSSFT(std::vector<Rule> &&rules, const Symbol &marker, bool minimize = true)
 		: marker(marker), minimize(minimize) {
 		// build a trie of the left parts of the rules
 
@@ -351,7 +351,7 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Letter, alphabetSize> {
 			}
 			out << "\"];\n";	 // final States with output
 
-			for (Letter l = 0; l < Letter::size; ++l) {
+			for (Symbol l = 0; l < Symbol::size; ++l) {
 				const auto &[outputID, next] = transitions[s][size_t(l)];
 				if (next != -1u) {
 					out << "  " << s << " -> " << next << " [label=\"<" << l << ", ";
@@ -365,7 +365,7 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Letter, alphabetSize> {
 		// add the unminimized states
 		for (State s = 0; s < tempData.unminimizedStates.size(); ++s) {
 			out << "  " << N + s << " [shape=circle, style=dashed];\n";
-			for (Letter l = 0; l < Letter::size; ++l) {
+			for (Symbol l = 0; l < Symbol::size; ++l) {
 				const auto &[outputID, next] = tempData.unminimizedStates[s][size_t(l)];
 				if (next != -1u) {
 					out << "  " << N + s << " -> " << (next < N ? next : N + next - N) << " [label=\"<" << l << ", ";
@@ -389,8 +389,8 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Letter, alphabetSize> {
 		out << "}\n";
 	}
 
-	ReplaceWithMarkerSSFT(std::istream &in, const Letter &marker)
-		: fl::TotalSSFT<Letter, alphabetSize>(in), marker(marker) {}
+	ReplaceWithMarkerSSFT(std::istream &in, const Symbol &marker)
+		: fl::TotalSSFT<Symbol, alphabetSize>(in), marker(marker) {}
 
 	ReplaceWithMarkerSSFT(const ReplaceWithMarkerSSFT &)			= default;
 	ReplaceWithMarkerSSFT(ReplaceWithMarkerSSFT &&)					= default;

@@ -9,10 +9,11 @@
 #include <unordered_map>
 #include <vector>
 #include <ranges>
+#include "concepts.hpp"
 
 namespace fl {
 
-template <class Letter>
+template <symbol Symbol>
 class WordSet {
    public:
 	using WordID = unsigned int;
@@ -22,17 +23,17 @@ class WordSet {
 	};
 
    private:
-	std::vector<Letter>	  words;
+	std::vector<Symbol>	  words;
 	std::vector<WordData> wordsData;
 
 	WordID nextWordID = 0;
 
    public:
-	WordSet() { addWord(std::span<Letter>{}); }
+	WordSet() { addWord(std::span<Symbol>{}); }
 
-	WordSet(std::vector<Letter> &&words_, std::vector<WordData> &&wordsData_)
+	WordSet(std::vector<Symbol> &&words_, std::vector<WordData> &&wordsData_)
 		: words(std::move(words_)), wordsData(std::move(wordsData_)), nextWordID(wordsData.size()) {}
-	WordSet(const std::vector<Letter> &words_, const std::vector<WordData> &wordsData_)
+	WordSet(const std::vector<Symbol> &words_, const std::vector<WordData> &wordsData_)
 		: words(std::move(words_)), wordsData(std::move(wordsData_)), nextWordID(wordsData.size()) {}
 
 	template <class Input>
@@ -100,46 +101,46 @@ class WordSet {
 	auto end() const { return Iterator(*this, nextWordID); }
 };
 
-template <class Letter>
+template <symbol Symbol>
 class UniqueWordSet {
    public:
 	using WordID = unsigned int;
 
    private:
-	using WordData = WordSet<Letter>::WordData;
+	using WordData = WordSet<Symbol>::WordData;
 
 	struct Storage {
-		std::vector<Letter>	  words;
+		std::vector<Symbol>	  words;
 		std::vector<WordData> wordsData;
 
-		std::span<const Letter> get(WordID id) const noexcept {
+		std::span<const Symbol> get(WordID id) const noexcept {
 			const auto &[start, length] = wordsData[id];
 			return {words.data() + start, length};
 		}
-		auto insert(std::span<const Letter> word) {
+		auto insert(std::span<const Symbol> word) {
 			wordsData.emplace_back(words.size(), word.size());
 			words.insert(words.end(), word.begin(), word.end());
 		}
 	};
 
 	struct myHash {
-		using is_transparent = void;	 // Allows this hash to be used in unordered_map with std::span<Letter>
+		using is_transparent = void;	 // Allows this hash to be used in unordered_map with std::span<Symbol>
 		const Storage *owner;
 		constexpr myHash(const Storage *owner) : owner(owner) {}
 
 		constexpr size_t operator()(WordID id) const { return (*this)(owner->get(id)); }
-		constexpr size_t operator()(const std::span<Letter> &span) const {
+		constexpr size_t operator()(const std::span<Symbol> &span) const {
 			return std::hash<std::string_view>()(
-				std::string_view(reinterpret_cast<const char *>(span.data()), span.size() * sizeof(Letter)));
+				std::string_view(reinterpret_cast<const char *>(span.data()), span.size() * sizeof(Symbol)));
 		}
-		constexpr size_t operator()(const std::span<const Letter> &span) const {
+		constexpr size_t operator()(const std::span<const Symbol> &span) const {
 			return std::hash<std::string_view>()(
-				std::string_view(reinterpret_cast<const char *>(span.data()), span.size() * sizeof(Letter)));
+				std::string_view(reinterpret_cast<const char *>(span.data()), span.size() * sizeof(Symbol)));
 		}
 	};
 
 	struct myEqual {
-		using is_transparent = void;	 // Allows this equal to be used in unordered_map with std::span<Letter>
+		using is_transparent = void;	 // Allows this equal to be used in unordered_map with std::span<Symbol>
 		const Storage *owner;
 		constexpr myEqual(const Storage *owner) : owner(owner) {}
 
@@ -172,7 +173,7 @@ class UniqueWordSet {
 
    public:
 	UniqueWordSet() : storage(std::make_unique<Storage>()), wordMap(0, myHash(storage.get()), myEqual(storage.get())) {
-		addWord(std::span<Letter>{});
+		addWord(std::span<Symbol>{});
 	}
 
 	UniqueWordSet(const UniqueWordSet &) = delete;
@@ -207,8 +208,8 @@ class UniqueWordSet {
 		return wordMap.find(std::span{word.begin(), word.end()}) != wordMap.end();
 	}
 
-	WordID addWord(Letter *word, size_t length) {
-		if (length == 0) return addWord(std::span<Letter>{});
+	WordID addWord(Symbol *word, size_t length) {
+		if (length == 0) return addWord(std::span<Symbol>{});
 		auto it = wordMap.find(std::span{word, length});
 		if (it != wordMap.end()) {
 			return it->second;	   // Word already exists, return its ID
@@ -223,7 +224,7 @@ class UniqueWordSet {
 		if (id >= nextWordID) { throw std::out_of_range(std::format("Invalid WordID: {}, size: {}", id, nextWordID)); }
 		const auto &[start, wordLength] = storage->wordsData[id];
 		if (offset + length > wordLength) { throw std::out_of_range("Substring exceeds word length"); }
-		std::span<const Letter> subWord{storage->words.data() + start + offset, length};
+		std::span<const Symbol> subWord{storage->words.data() + start + offset, length};
 		auto					it = wordMap.find(subWord);
 		if (it != wordMap.end()) {
 			return it->second;	   // Subword already exists, return its ID
@@ -252,7 +253,7 @@ class UniqueWordSet {
 	}
 
 	auto toWordSet() const {
-		WordSet<Letter> ws{storage->words, storage->wordsData};
+		WordSet<Symbol> ws{storage->words, storage->wordsData};
 		return ws;
 	}
 
@@ -281,7 +282,7 @@ class UniqueWordSet {
 		out.write(reinterpret_cast<const char *>(&nextWordID), sizeof(nextWordID));
 		out.write(reinterpret_cast<const char *>(storage->wordsData.data()),
 				  storage->wordsData.size() * sizeof(WordData));
-		out.write(reinterpret_cast<const char *>(storage->words.data()), storage->words.size() * sizeof(Letter));
+		out.write(reinterpret_cast<const char *>(storage->words.data()), storage->words.size() * sizeof(Symbol));
 		return *this;
 	}
 
@@ -294,7 +295,7 @@ class UniqueWordSet {
 			totalLength = std::max(totalLength, start + length);
 		}
 		storage->words.resize(totalLength);
-		in.read(reinterpret_cast<char *>(storage->words.data()), totalLength * sizeof(Letter));
+		in.read(reinterpret_cast<char *>(storage->words.data()), totalLength * sizeof(Symbol));
 		wordMap.reserve(nextWordID);
 		for (WordID id = 0; id < nextWordID; ++id) {
 			wordMap.insert({id, id});
@@ -302,9 +303,9 @@ class UniqueWordSet {
 	}
 };
 
-template <class Letter>
+template <class Symbol>
 class ExtendableWordSet {
-	std::vector<std::vector<Letter>> data;
+	std::vector<std::vector<Symbol>> data;
 	struct WordData {
 		unsigned int base;
 		unsigned int start;
@@ -336,7 +337,7 @@ class ExtendableWordSet {
 	template <class Input>
 	WordID addWord(Input &&word) {
 		if (word.empty()) return 0;
-		data.push_back(std::vector<Letter>(word.begin(), word.end()));
+		data.push_back(std::vector<Symbol>(word.begin(), word.end()));
 		wordsData.push_back(
 			{static_cast<unsigned int>(data.size() - 1), 0, static_cast<unsigned int>(word.size()), true});
 		return wordsData.size() - 1;
@@ -355,7 +356,7 @@ class ExtendableWordSet {
 			return wordsData.size() - 1;
 		} else {
 			if (length + extension.size() == 0) return 0;
-			data.push_back(std::vector<Letter>(data[base].begin() + start, data[base].begin() + start + length));
+			data.push_back(std::vector<Symbol>(data[base].begin() + start, data[base].begin() + start + length));
 			data.back().insert(data.back().end(), extension.begin(), extension.end());
 			wordsData.push_back(
 				{static_cast<unsigned int>(data.size() - 1), 0, static_cast<unsigned int>(data.back().size()), true});

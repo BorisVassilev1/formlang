@@ -14,17 +14,17 @@ struct hash {
 	constexpr size_t operator()(const A &x) const { return std::hash<A>()(x); }
 };
 
-template <isLetter Letter>
-struct hash<Letter> {
+template <symbol Symbol>
+struct hash<Symbol> {
 	constexpr hash() = default;
-	constexpr size_t operator()(const Letter &x) const { return std::hash<size_t>()((size_t)x); }
+	constexpr size_t operator()(const Symbol &x) const { return std::hash<size_t>()((size_t)x); }
 };
 
-template <isLetter Letter>
-struct hash<std::span<Letter>> {
+template <symbol Symbol>
+struct hash<std::span<Symbol>> {
 	constexpr hash() = default;
-	constexpr size_t operator()(const std::span<Letter> &x) const {
-		return std::hash<std::string_view>()(std::string_view(reinterpret_cast<const char *>(x.data()), x.size() * sizeof(Letter)));
+	constexpr size_t operator()(const std::span<Symbol> &x) const {
+		return std::hash<std::string_view>()(std::string_view(reinterpret_cast<const char *>(x.data()), x.size() * sizeof(Symbol)));
 	}
 };
 
@@ -37,16 +37,16 @@ struct hash<std::array<A, N>> {
 	}
 };
 
-template <class Letter>
-struct hash<std::vector<Letter>> {
+template <class Symbol>
+struct hash<std::vector<Symbol>> {
 	constexpr hash() = default;
-	constexpr size_t operator()(const std::vector<Letter> &x) const {
-		return std::hash<std::string_view>()(std::string_view(reinterpret_cast<const char *>(x.data()), x.size() * sizeof(Letter)));
+	constexpr size_t operator()(const std::vector<Symbol> &x) const {
+		return std::hash<std::string_view>()(std::string_view(reinterpret_cast<const char *>(x.data()), x.size() * sizeof(Symbol)));
 	}
 };
 
-template <isState State>
-	requires(not std::same_as<State, size_t> and not isLetter<State>)
+template <state State>
+	requires(not std::same_as<State, size_t> and not symbol<State>)
 struct hash<State> {
 	constexpr hash() = default;
 	constexpr size_t operator()(const State &x) const { return hash<size_t>()(x); }

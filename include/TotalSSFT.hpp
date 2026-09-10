@@ -7,11 +7,11 @@
 
 namespace fl {
 
-template <isLetter Letter, std::size_t alphabetSize = Letter::size>
+template <symbol Symbol, std::size_t alphabetSize = Symbol::size>
 class TotalSSFT {
    public:
 	using State	 = unsigned int;
-	using WordID = UniqueWordSet<Letter>::WordID;
+	using WordID = UniqueWordSet<Symbol>::WordID;
 	struct Transition {
 		WordID outputID;
 		State  next;
@@ -20,11 +20,11 @@ class TotalSSFT {
 		bool   operator<=>(const Transition &other) const = default;
 	};
 	using Map	   = std::vector<std::array<Transition, alphabetSize>>;
-	using Letter_t = Letter;
+	using Letter_t = Symbol;
 
    protected:
 	unsigned int		  N = 0;
-	UniqueWordSet<Letter> words;
+	UniqueWordSet<Symbol> words;
 
 	/// transitions[from][letter] = (outputID, to)
 	Map transitions;
@@ -45,16 +45,16 @@ class TotalSSFT {
 	[[clang::always_inline]] inline constexpr std::size_t cacheCount() const { return words.size(); }
 	[[clang::always_inline]] inline constexpr std::size_t cacheSize() const { return words.totalLength(); }
 
-	[[clang::always_inline]] inline std::pair<std::span<const Letter>, bool> step(State &state, Letter letter) const {
+	[[clang::always_inline]] inline std::pair<std::span<const Symbol>, bool> step(State &state, Symbol letter) const {
 		auto &[outputID, next] = transitions[state][size_t(letter)];
-		if (next == -1u) return std::make_pair(std::span<const Letter>{}, false);
+		if (next == -1u) return std::make_pair(std::span<const Symbol>{}, false);
 		state = next;
 		return std::make_pair(words[outputID], true);
 	}
 
-	[[clang::always_inline]] inline bool steps(State &state, std::span<const Letter> input,
-											   std::vector<Letter> &output) const {
-		for (Letter letter : input) {
+	[[clang::always_inline]] inline bool steps(State &state, std::span<const Symbol> input,
+											   std::vector<Symbol> &output) const {
+		for (Symbol letter : input) {
 			auto [out, ok] = step(state, letter);
 			if (!ok) return false;
 			output.insert(output.end(), out.begin(), out.end());
@@ -62,15 +62,15 @@ class TotalSSFT {
 		return true;
 	}
 
-	[[clang::always_inline]] inline std::span<const Letter> psi(State state) const {
-		return std::span<const Letter>(words[output[state]]);
+	[[clang::always_inline]] inline std::span<const Symbol> psi(State state) const {
+		return std::span<const Symbol>(words[output[state]]);
 	}
 	[[clang::always_inline]] inline State initial() const { return 0; }
 
-	[[clang::always_inline]] inline std::span<const Letter> initialOutput() const { return words[initialOut]; }
+	[[clang::always_inline]] inline std::span<const Symbol> initialOutput() const { return words[initialOut]; }
 	[[clang::always_inline]] inline bool					isFinal(State) const { return true; }
 
-	void f(std::span<const Letter> input, std::vector<Letter> &outputWord) const {
+	void f(std::span<const Symbol> input, std::vector<Symbol> &outputWord) const {
 		State state = 0;
 		outputWord.clear();
 		outputWord.insert(outputWord.end(), words[initialOut].begin(), words[initialOut].end());
@@ -83,8 +83,8 @@ class TotalSSFT {
 		for (const auto &outLetter : words[output[state]])
 			outputWord.push_back(outLetter);
 	}
-	std::vector<Letter> f(std::span<const Letter> input) const {
-		std::vector<Letter> outputWord;
+	std::vector<Symbol> f(std::span<const Symbol> input) const {
+		std::vector<Symbol> outputWord;
 		f(input, outputWord);
 		return outputWord;
 	}
@@ -99,7 +99,7 @@ class TotalSSFT {
 
 	TotalSSFT(std::istream &in) {
 		in.read(reinterpret_cast<char *>(&N), sizeof(N));
-		words = UniqueWordSet<Letter>(in);
+		words = UniqueWordSet<Symbol>(in);
 		transitions.resize(N);
 		output.resize(N);
 		in.read(reinterpret_cast<char *>(transitions.data()), transitions.size() * sizeof(transitions[0]));
@@ -121,7 +121,7 @@ class TotalSSFT {
 				out << "\"];\n";								 // final States with output
 			} else out << "  " << s << " [shape=circle];\n";	 // final States
 
-			for (Letter l = 0; l < Letter::size; ++l) {
+			for (Symbol l = 0; l < Symbol::size; ++l) {
 				const auto &[outputID, next] = transitions[s][size_t(l)];
 				if (next != -1u) {
 					out << "  " << s << " -> " << next << " [label=\"<" << l << ", ";
@@ -137,8 +137,8 @@ class TotalSSFT {
 	}
 };
 
-template <class Letter, size_t alphabetSize>
-void drawFSA(const TotalSSFT<Letter, alphabetSize> &fsa) {
+template <class Symbol, size_t alphabetSize>
+void drawFSA(const TotalSSFT<Symbol, alphabetSize> &fsa) {
 	ShellProcess p("dot -Tsvg > a.svg && feh ./a.svg");
 	fsa.print(p.in());
 	p.in() << std::endl;
@@ -149,25 +149,25 @@ void drawFSA(const TotalSSFT<Letter, alphabetSize> &fsa) {
 	if (!err.empty()) std::cout << err << std::endl;
 }
 
-template <class Letter, size_t alphabetSize>
-void statFSA(const TotalSSFT<Letter, alphabetSize> &fsa) {
+template <class Symbol, size_t alphabetSize>
+void statFSA(const TotalSSFT<Symbol, alphabetSize> &fsa) {
 	std::cout << "Subsequential Transtuder : |Q| = " << fsa.size() << ", |Σ| = " << alphabetSize
 			  << ", |Δ| = " << fsa.size() * alphabetSize << ", |strings| = " << fsa.cacheCount()
 			  << ", total = " << fsa.cacheSize() << std::endl;
 }
 
 /// tests if the subsequential transducer is canonical
-template <isSubSeqTransducer Transducer>
+template <SSFST Transducer>
 bool isCanonical(const Transducer &t) {
 	using State = typename Transducer::State;
-	using Letter = typename Transducer::Letter_t;
+	using Symbol = typename Transducer::Letter_t;
 
 	for (State s = 0; s < t.size(); ++s) {
-		std::span<const Letter> gcp;
+		std::span<const Symbol> gcp;
 		bool					haveCandidate = t.isFinal(s);
 		if (haveCandidate) gcp = t.psi(s);
 
-		for (Letter l = 0; l < Letter::size; ++l) {
+		for (Symbol l = 0; l < Symbol::size; ++l) {
 			if (haveCandidate && gcp.empty()) break;
 			State next			= s;
 			auto [out, ok] = t.step(next, l);
@@ -190,5 +190,5 @@ bool isCanonical(const Transducer &t) {
 }	  // namespace fl
 
 #include "letter.hpp"
-static_assert(fl::isSubSeqTransducer<fl::TotalSSFT<fl::Letter>>,
+static_assert(fl::SSFSTI<fl::TotalSSFT<fl::Letter>>,
 			  "TotalSSFT does not satisfy the subsequential transducer concept");

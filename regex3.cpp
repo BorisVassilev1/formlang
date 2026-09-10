@@ -101,7 +101,7 @@ int main() {
 
 		std::string input;
 		std::getline(std::cin, input);
-		auto [result, b] = ssfst.f(toLetter<Letter>(input));
+		auto [result, b] = ssfst.f(toSymbol<Letter>(input));
 		if (b) {
 			std::cout << "output len: " << result.size() << std::endl;
 			std::cout << "Input accepted: " << result << std::endl;

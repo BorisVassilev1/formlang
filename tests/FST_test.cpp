@@ -12,22 +12,25 @@
 
 using namespace fl;
 
-auto toLetter(const char *s) { return fl::toLetter<Letter>(s); }
+template <class Letter>
+using SSFST_t = SparseSSFST<Letter>;
+
+auto toSymbol(const char *s) { return fl::toSymbol<Letter>(s); }
 
 void test_determinization() {
 	ExpandedFST<Letter> fsa;
 	fsa.N		= 8;
 	fsa.qFirsts = {0, 1};
 	fsa.qFinals = {3, 6, 7};
-	fsa.addTransition(0, 'a', toLetter("c"), 2);
-	fsa.addTransition(0, 'a', toLetter("cc"), 3);
-	fsa.addTransition(1, 'a', toLetter("cc"), 3);
-	fsa.addTransition(1, 'a', toLetter("ccc"), 4);
-	fsa.addTransition(2, 'b', toLetter("ccd"), 5);
-	fsa.addTransition(3, 'b', toLetter("cd"), 5);
-	fsa.addTransition(4, 'b', toLetter("dd"), 6);
-	fsa.addTransition(5, 'a', toLetter("d"), 7);
-	fsa.addTransition(6, 'a', toLetter(""), 7);
+	fsa.addTransition(0, 'a', toSymbol("c"), 2);
+	fsa.addTransition(0, 'a', toSymbol("cc"), 3);
+	fsa.addTransition(1, 'a', toSymbol("cc"), 3);
+	fsa.addTransition(1, 'a', toSymbol("ccc"), 4);
+	fsa.addTransition(2, 'b', toSymbol("ccd"), 5);
+	fsa.addTransition(3, 'b', toSymbol("cd"), 5);
+	fsa.addTransition(4, 'b', toSymbol("dd"), 6);
+	fsa.addTransition(5, 'a', toSymbol("d"), 7);
+	fsa.addTransition(6, 'a', toSymbol(""), 7);
 
 	drawFSA(fsa);
 
@@ -40,7 +43,7 @@ void test_determinization() {
 		std::cout << "FSA is functional." << std::endl;
 	}
 
-	SSFT<Letter> ssft(std::move(fsa));
+	SSFST_t<Letter> ssft(std::move(fsa));
 	statFSA(ssft);
 
 	std::cout << "draw SSFT" << std::endl;
@@ -52,11 +55,11 @@ void test_bounded_variation() {
 	efst.N		 = 4;
 	efst.qFirsts = {0};
 	efst.qFinals = {0, 1, 3};
-	efst.addTransition(0, 'a', toLetter("a"), 1);
-	efst.addTransition(1, 'a', toLetter("a"), 1);
-	efst.addTransition(0, 'a', toLetter(""), 2);
-	efst.addTransition(2, 'a', toLetter(""), 2);
-	efst.addTransition(2, 'b', toLetter("b"), 3);
+	efst.addTransition(0, 'a', toSymbol("a"), 1);
+	efst.addTransition(1, 'a', toSymbol("a"), 1);
+	efst.addTransition(0, 'a', toSymbol(""), 2);
+	efst.addTransition(2, 'a', toSymbol(""), 2);
+	efst.addTransition(2, 'b', toSymbol("b"), 3);
 
 	drawFSA(efst);
 
@@ -69,7 +72,7 @@ void test_bounded_variation() {
 	}
 
 	try {
-		SSFT<Letter> ssft(std::move(efst));
+		SSFST_t<Letter> ssft(std::move(efst));
 		statFSA(ssft);
 
 		std::cout << "draw SSFT" << std::endl;
@@ -125,18 +128,18 @@ void test_replace() {
 		std::cout << "FSA is functional." << std::endl;
 	}
 
-	SSFT<Letter> ssft(std::move(fsa));
+	SSFST_t<Letter> ssft(std::move(fsa));
 	statFSA(ssft);
 
 	std::cout << "draw SSFT" << std::endl;
 	// drawFSA(ssft);
 
-	auto input		 = toLetter("abbababb");
+	auto input		 = toSymbol("abbababb");
 	auto [output, b] = ssft.f(input);
 	std::cout << "Input: " << input << std::endl;
 	std::cout << "Output: " << output << std::endl;
 
-	input				= toLetter("ab:)ab:)aaa:):)a=D=Dbab");
+	input				= toSymbol("ab:)ab:)aaa:):)a=D=Dbab");
 	std::tie(output, b) = ssft.f(input);
 	std::cout << "Input: " << input << std::endl;
 	std::cout << "Output: " << output << std::endl;

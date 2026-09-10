@@ -110,14 +110,14 @@ int main(int argc, char **argv) {
 		}
 		try {
 			std::cout << "converting to SSFT..." << std::endl;
-			auto ssfst = SSFT<Letter>(std::move(efst));
+			auto ssfst = SparseSSFST<Letter>(std::move(efst));
 			drawFSA(ssfst);
 
 			statFSA(ssfst);
 
 			std::string input;
 			std::cin >> input;
-			auto [result, b] = ssfst.f(toLetter<Letter>(input));
+			auto [result, b] = ssfst.f(toSymbol<Letter>(input));
 			if (b) {
 				std::cout << "Input accepted: " << result << std::endl;
 			} else {

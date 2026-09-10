@@ -179,7 +179,7 @@ auto createTokenizer() {
 }
 
 std::pair<std::vector<Token>, WordSet<Token>> tokenize(std::vector<Token> &text) {
-	static fl::SSFT<Token> tokenizer = createTokenizer();
+	static fl::SparseSSFST<Token> tokenizer = createTokenizer();
 	std::vector<Token>	   tokens;
 	WordSet<Token>		   words;
 

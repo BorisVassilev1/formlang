@@ -7,16 +7,16 @@ namespace fl {
 /**
  * @brief An Earley Parser for Context-Free Grammars
  *
- * @tparam Letter
+ * @tparam Symbol
  */
-template <isLetter Letter>
+template <symbol Symbol>
 class EarleyParser {
-	CFG<Letter> grammar;
+	CFG<Symbol> grammar;
 
    public:
 	// struct DottedRule {
-	//	Letter				 lhs;
-	//	std::vector<Letter> *rhs;
+	//	Symbol				 lhs;
+	//	std::vector<Symbol> *rhs;
 	//	int					 dotPos;
 	//	int					 j;
 	// };
@@ -24,8 +24,8 @@ class EarleyParser {
 	bool expect_eof	  = false;
 	bool enable_print = false;
 
-	using DottedRule = std::tuple<Letter, std::vector<Letter> *, int, int>;
-	EarleyParser(const CFG<Letter> &g) : grammar(g) {}
+	using DottedRule = std::tuple<Symbol, std::vector<Symbol> *, int, int>;
+	EarleyParser(const CFG<Symbol> &g) : grammar(g) {}
 
 	auto C(const std::vector<fl::unordered_set<DottedRule>> &R, fl::unordered_set<DottedRule> &R_ip, int i) {
 		fl::unordered_set<DottedRule> &C_s	 = R_ip;
@@ -87,7 +87,7 @@ class EarleyParser {
 		return C_s;
 	}
 
-	bool recognize(const std::vector<Letter> &word) {
+	bool recognize(const std::vector<Symbol> &word) {
 		std::vector<fl::unordered_set<DottedRule>> R(word.size() + 1);
 		std::vector<fl::unordered_set<DottedRule>> Rp(word.size() + 1);
 

@@ -17,24 +17,24 @@ namespace fl {
 /// Expanded FST
 ///		(FST with only single letter or epsilon on the input tape)
 ///	If the input tape is never epsilon, then this is a realtime FST (non-deterministic)
-template <class Letter>
+template <symbol Symbol>
 class ExpandedFST {
    public:
 	using State	   = unsigned int;
-	using StringID = typename WordSet<Letter>::WordID;
+	using StringID = typename WordSet<Symbol>::WordID;
 
-	using Map = unordered_multimap<State, std::tuple<Letter, StringID, State>>;
+	using Map = unordered_multimap<State, std::tuple<Symbol, StringID, State>>;
 
 	unsigned int		 N = 0;
 	unordered_set<State> qFirsts;
 	unordered_set<State> qFinals;
 	Map					 transitions;
-	WordSet<Letter>		 words;
+	WordSet<Symbol>		 words;
 
 	unordered_set<StringID> f_eps{};
 
-	void addTransition(State from, Letter w1, StringID w2, State to) { transitions.insert({from, {w1, w2, to}}); }
-	void addTransition(State from, Letter w1, const std::vector<Letter> w2, State to) {
+	void addTransition(State from, Symbol w1, StringID w2, State to) { transitions.insert({from, {w1, w2, to}}); }
+	void addTransition(State from, Symbol w1, const std::vector<Symbol> w2, State to) {
 		if (w2.empty()) addTransition(from, w1, 0, to);
 		else {
 			StringID id2 = words.addWord(std::span{w2.data(), w2.size()});
@@ -58,11 +58,11 @@ class ExpandedFST {
 			auto &[w1, id2, to] = value;
 			auto w2				= words.getWord(id2);
 			out << "  " << from << " -> " << to << " [label=\"<";
-			if (w1 == Letter('\"')) out << "\\";
+			if (w1 == Symbol('\"')) out << "\\";
 			out << w1 << ",";
 			for (const auto &letter : w2) {
 				// if ((uint8_t(letter) < 128 && uint8_t(letter) >= 32) || size_t(letter) > 256)
-				out << letter;	   // TODO: This will break for some Letter types
+				out << letter;	   // TODO: This will break for some Symbol types
 								   // else out << (int)letter;
 			}
 			out << ">\"];\n";
@@ -74,8 +74,8 @@ class ExpandedFST {
 
 	/// this will work only for the type BPEToken because this outputs the outpt wordID-s and not the actual letters
 	/// this was done because that is the case for byte-pair encodings
-	auto f(const std::vector<Letter> &input) const {
-		using DelayID  = UniqueWordSet<Letter>::WordID;
+	auto f(const std::vector<Symbol> &input) const {
+		using DelayID  = UniqueWordSet<Symbol>::WordID;
 		using BigState = std::vector<std::tuple<State, DelayID>>;	  // (state, position in input)
 		static BigState			state0;
 		static BigState			state1;
@@ -99,7 +99,7 @@ class ExpandedFST {
 		}
 		std::sort(currentState->begin(), currentState->end());
 
-		std::vector<Letter> output;
+		std::vector<Symbol> output;
 		for (size_t pos = 0; pos < input.size(); ++pos) {
 			// std::cout << "TFSA::f: processing position " << pos << " / " << input.size()
 			//		  << ", current states: " << currentState.size();
@@ -158,7 +158,7 @@ class ExpandedFST {
 				// std::cout << "]" << std::endl;
 
 				for (const auto &l : eaten)
-					if (l != 0) output.push_back(Letter(l));
+					if (l != 0) output.push_back(Symbol(l));
 			}
 
 			for (auto &[q, delay_id] : *nextState) {
@@ -212,7 +212,7 @@ class ExpandedFST {
 			size_t map_size;
 			in.read(reinterpret_cast<char *>(&map_size), sizeof(map_size));
 			for (size_t i = 0; i < map_size; ++i) {
-				Letter	 letter;
+				Symbol	 letter;
 				StringID id2;
 				State	 to;
 				in.read(reinterpret_cast<char *>(&letter), sizeof(letter));
@@ -231,11 +231,11 @@ class ExpandedFST {
 	}
 };
 
-template <class Letter>
-auto expandFST(FST<Letter> &&fst) {
-	ExpandedFST<Letter> expanded;
-	using State		 = ExpandedFST<Letter>::State;
-	using StringID	 = ExpandedFST<Letter>::StringID;
+template <class Symbol>
+auto expandFST(FST<Symbol> &&fst) {
+	ExpandedFST<Symbol> expanded;
+	using State		 = ExpandedFST<Symbol>::State;
+	using StringID	 = ExpandedFST<Symbol>::StringID;
 	expanded.N		 = fst.N;
 	expanded.qFirsts = std::move(fst.qFirsts);
 	expanded.qFinals = std::move(fst.qFinals);
@@ -245,7 +245,7 @@ auto expandFST(FST<Letter> &&fst) {
 		auto &w2			= fst.words[id2];
 		if (id1 == 0) {
 			auto new_id = expanded.words.addWord(w2);
-			expanded.addTransition(from, Letter::eps, new_id, to);
+			expanded.addTransition(from, Symbol::eps, new_id, to);
 			continue;
 		}
 		auto &w1   = fst.words[id1];
@@ -284,8 +284,8 @@ auto expandFST(FST<Letter> &&fst) {
 	return expanded;
 }
 
-template <class Letter>
-void drawFSA(const ExpandedFST<Letter> &fsa) {
+template <class Symbol>
+void drawFSA(const ExpandedFST<Symbol> &fsa) {
 	ShellProcess p("dot -Tsvg > a.svg && feh ./a.svg");
 	fsa.print(p.in());
 	p.in() << std::endl;
@@ -297,14 +297,14 @@ void drawFSA(const ExpandedFST<Letter> &fsa) {
 }
 
 // https://lml.bas.bg/~stoyan/finite-state-techniques.pdf#theorem.4.4.8
-template <class Letter>
-auto removeUpperEpsilonFST(ExpandedFST<Letter> &&fsa) {
-	using State	   = ExpandedFST<Letter>::State;
-	using StringID = ExpandedFST<Letter>::StringID;
+template <class Symbol>
+auto removeUpperEpsilonFST(ExpandedFST<Symbol> &&fsa) {
+	using State	   = ExpandedFST<Symbol>::State;
+	using StringID = ExpandedFST<Symbol>::StringID;
 
 	std::stack<int>													 stack;
 	std::vector<bool>												 visited(fsa.N, false);
-	std::vector<std::vector<std::tuple<State, std::vector<Letter>>>> closure(fsa.N);
+	std::vector<std::vector<std::tuple<State, std::vector<Symbol>>>> closure(fsa.N);
 
 	for (State i = 0; i < fsa.N; ++i) {
 		stack.push(0);
@@ -318,7 +318,7 @@ auto removeUpperEpsilonFST(ExpandedFST<Letter> &&fsa) {
 			auto [i1, i2] = fsa.transitions.equal_range(current);
 			for (const auto &[_, value] : std::ranges::subrange(i1, i2)) {
 				const auto &[w1, id2, to] = value;
-				if (w1 == Letter::eps && !visited[to]) {	 // epsilon transition
+				if (w1 == Symbol::eps && !visited[to]) {	 // epsilon transition
 					visited[to]	  = true;
 					auto new_word = u;
 					new_word.insert(new_word.end(), fsa.words.getWord(id2).begin(), fsa.words.getWord(id2).end());
@@ -343,10 +343,10 @@ auto removeUpperEpsilonFST(ExpandedFST<Letter> &&fsa) {
 	std::erase_if(fsa.transitions, [](const auto &pair) {
 		const auto &[from, value] = pair;
 		const auto &[w1, id2, to] = value;
-		return w1 == Letter::eps;	  // remove epsilon transitions
+		return w1 == Symbol::eps;	  // remove epsilon transitions
 	});
 
-	typename ExpandedFST<Letter>::Map new_transitions;
+	typename ExpandedFST<Symbol>::Map new_transitions;
 	for (State q1 = 0; q1 < fsa.N; ++q1) {
 		for (const auto &[q_, u] : closure[q1]) {
 			auto [i1, i2] = fsa.transitions.equal_range(q_);
@@ -368,18 +368,18 @@ auto removeUpperEpsilonFST(ExpandedFST<Letter> &&fsa) {
 	return std::move(fsa);
 }
 
-template <class Letter>
-auto trimFSA(ExpandedFST<Letter> &&fsa) {
+template <class Symbol>
+auto trimFSA(ExpandedFST<Symbol> &&fsa) {
 	if (fsa.qFinals.empty()) {
 		fsa.N		= 0;
 		fsa.qFirsts = {0};
 		fsa.words.clear();
-		fsa.words.addWord(std::span<Letter>{});		// add empty word
+		fsa.words.addWord(std::span<Symbol>{});		// add empty word
 		fsa.transitions.clear();
 		return std::move(fsa);
 	}
-	using State	   = FST<Letter>::State;
-	using StringID = FST<Letter>::StringID;
+	using State	   = FST<Symbol>::State;
+	using StringID = FST<Symbol>::StringID;
 	std::vector<bool> visited_back(fsa.N, false);
 	std::vector<bool> visited_forw(fsa.N, false);
 
@@ -446,7 +446,7 @@ auto trimFSA(ExpandedFST<Letter> &&fsa) {
 		return std::move(fsa);
 	}
 
-	ExpandedFST<Letter> new_fsa;
+	ExpandedFST<Symbol> new_fsa;
 	new_fsa.N = cnt;
 	new_fsa.qFirsts.reserve(fsa.qFirsts.size());
 	for (const auto &q : fsa.qFirsts) {
@@ -494,24 +494,24 @@ auto trimFSA(ExpandedFST<Letter> &&fsa) {
 	return std::move(new_fsa);
 }
 
-template <isLetter Letter>
-auto realtimeFST(FST<Letter> &&fst) {
+template <symbol Symbol>
+auto realtimeFST(FST<Symbol> &&fst) {
 	return trimFSA(removeUpperEpsilonFST(expandFST(removeEpsilonFST(trimFSA(std::move(fst))))));
 }
 
 /// Pseudo-determinization of an Expanded FST that has to be real-time
-template <isLetter Letter>
-auto pseudoDeterminizeFST(ExpandedFST<Letter> &&fst) {
-	using State = ExpandedFST<Letter>::State;
+template <symbol Symbol>
+auto pseudoDeterminizeFST(ExpandedFST<Symbol> &&fst) {
+	using State = ExpandedFST<Symbol>::State;
 
 	using BigState	= std::vector<State>;
-	using BigLetter = std::tuple<Letter, typename UniqueWordSet<Letter>::WordID>;
+	using BigLetter = std::tuple<Symbol, typename UniqueWordSet<Symbol>::WordID>;
 
-	ExpandedFST<Letter>									dfa;
+	ExpandedFST<Symbol>									dfa;
 	std::vector<std::reference_wrapper<const BigState>> states;
 	unordered_map<BigState, State>						state_map;
 	std::queue<State>									queue;
-	UniqueWordSet<Letter>								secondTapeWords;
+	UniqueWordSet<Symbol>								secondTapeWords;
 
 	auto getStateID = [&](BigState &&bs) -> std::pair<State, bool> {
 		std::ranges::sort(bs);
@@ -569,6 +569,6 @@ auto pseudoDeterminizeFST(ExpandedFST<Letter> &&fst) {
 	dfa.words = std::move(secondTapeWords.toWordSet());
 	// drawFSA(dfa);
 
-	return std::move(dfa);
+	return dfa;
 }
 }	  // namespace fl

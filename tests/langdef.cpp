@@ -15,7 +15,7 @@ int main() {
 	auto g = Seq(Letter('S'), {true, false, true}, Letter('['),
 				 Optional(Letter('A'),
 						  Seq(Letter('B'), Letter('1'),
-							  Repeat(Letter('C'), Production<Letter>(toLetter<Letter>(",1"), {true, false}), INT_MAX))),
+							  Repeat(Letter('C'), Production<Letter>(toSymbol<Letter>(",1"), {true, false}), INT_MAX))),
 				 Letter(']'));
 
 	g.printParseTable();
@@ -23,10 +23,10 @@ int main() {
 
 	auto parser = Parser<Letter>(g);
 
-	parser.parse(toLetter<Letter>("[]#"));
-	parser.parse(toLetter<Letter>("[1]#"));
-	parser.parse(toLetter<Letter>("[1,1]#"));
-	parser.parse(toLetter<Letter>("[1,1,1]#"));
+	parser.parse(toSymbol<Letter>("[]#"));
+	parser.parse(toSymbol<Letter>("[1]#"));
+	parser.parse(toSymbol<Letter>("[1,1]#"));
+	parser.parse(toSymbol<Letter>("[1,1,1]#"));
 	auto pt = parser.parse("[1,1,1,1,1]#");
 	std::cout << pt << std::endl;
 
@@ -64,15 +64,15 @@ int main() {
 	auto SSFTTokenizer = Tokenizer.determinizeToSSFT();
 	drawFSA(SSFTTokenizer);
 
-	auto traverser = SSFTTraverser(SSFTTokenizer);
+	auto traverser = SSFSTTraverser(SSFTTokenizer);
 
-	auto result = traverser.traverseOutputOnlyUntilCan(toLetter<Token>("if"));
+	auto result = traverser.traverseOutputOnlyUntilCan(toSymbol<Token>("if"));
 	std::ranges::for_each(result, [](auto x) { std::cout << x << " "; });
 	std::cout << std::endl;
-	result = traverser.traverseOutputOnlyUntilCan(toLetter<Token>("for"));
+	result = traverser.traverseOutputOnlyUntilCan(toSymbol<Token>("for"));
 	std::ranges::for_each(result, [](auto x) { std::cout << x << " "; });
 	std::cout << std::endl;
-	result = traverser.traverseOutputOnlyUntilCan(toLetter<Token>("abc"));
+	result = traverser.traverseOutputOnlyUntilCan(toSymbol<Token>("abc"));
 	std::ranges::for_each(result, [](auto x) { std::cout << x << " "; });
 	std::cout << std::endl;
 

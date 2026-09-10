@@ -11,11 +11,11 @@
 
 namespace fl {
 
-template <fl::isLetter Letter>
-class ComposeTotalSSFT : public TotalSSFT<Letter> {
+template <fl::symbol Symbol>
+class ComposeTotalSSFT : public TotalSSFT<Symbol> {
    public:
-	ComposeTotalSSFT(const TotalSSFT<Letter> &first, const TotalSSFT<Letter> &second) {
-		using State = typename TotalSSFT<Letter>::State;
+	ComposeTotalSSFT(const TotalSSFT<Symbol> &first, const TotalSSFT<Symbol> &second) {
+		using State = typename TotalSSFT<Symbol>::State;
 
 		using BigState = std::tuple<State, State>;
 
@@ -35,9 +35,9 @@ class ComposeTotalSSFT : public TotalSSFT<Letter> {
 			return newID;
 		};
 
-		std::vector<Letter> scratchOutput;
+		std::vector<Symbol> scratchOutput;
 		auto				createTransition = [&](const BigState &state, State state_id,
-												   Letter letter) -> std::pair<BigState, State> {
+												   Symbol letter) -> std::pair<BigState, State> {
 			const auto &[s1, s2] = state;
 			State next_s1 = s1, next_s2 = s2;
 			auto [o1, succ1] = first.step(next_s1, letter);
@@ -87,7 +87,7 @@ class ComposeTotalSSFT : public TotalSSFT<Letter> {
 			scratchOutput.insert(scratchOutput.end(), o2.begin(), o2.end());
 			this->output[currentID] = this->words.addWord(scratchOutput);
 
-			for (Letter letter = 0; letter < Letter::size; ++letter) {
+			for (Symbol letter = 0; letter < Symbol::size; ++letter) {
 				auto [next, nextID] = createTransition(current, currentID, letter);
 				if (!visited[nextID]) { q.push(next); }
 			}
