@@ -52,12 +52,24 @@ struct hash<State> {
 	constexpr size_t operator()(const State &x) const { return hash<size_t>()(x); }
 };
 
+// boost::hash_combine, see https://www.boost.org/doc/libs/1_86_0/libs/container_hash/doc/html/hash.html#notes_hash_combine
+constexpr void hash_combine(std::size_t &seed, std::size_t value) {
+	seed ^= value + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+}
+
+template <class T>
+constexpr void hash_combine(std::size_t &seed, const T &v) {
+	hash_combine(seed, fl::hash<T>{}(v));
+}
+
 template <class... Args>
 struct hash<std::tuple<Args...>> {
 	constexpr hash() = default;
 	constexpr std::size_t operator()(const std::tuple<Args...> &t) const {
 		return [&]<std::size_t... p>(std::index_sequence<p...>) {
-			return ((fl::hash<NthTypeOf<p, Args...>>{}(std::get<p>(t))) ^ ...);
+			std::size_t seed = 0;
+			(hash_combine(seed, std::get<p>(t)), ...);
+			return seed;
 		}(std::make_index_sequence<std::tuple_size_v<std::tuple<Args...>>>{});
 	}
 };

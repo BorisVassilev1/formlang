@@ -1,5 +1,6 @@
 #pragma once
 #include <concepts>
+#include <ranges>
 #include <span>
 #include <string_view>
 #include <tuple>
@@ -60,6 +61,34 @@ concept SSFST =							//
 template <class T>
 concept SSFSTI = SSFST<T> && requires(T t) {
 	{ &T::initialOutput } -> std::same_as<std::span<const typename T::Letter_t> (T::*)() const>;
+};
+
+template <class M>
+concept monoid = requires(const M &m, const M::Value &a, const M::Value &b) {
+	typename M::Value;
+	requires std::semiregular<typename M::Value>;
+	{ m.identity } -> std::same_as<const typename M::Value &>;
+	{ m.equal(a, b) } -> std::convertible_to<bool>;
+	{ m.hash(a) } -> std::convertible_to<std::size_t>;
+	{ m.mul(a, b) } -> std::convertible_to<typename M::Value>;
+	{ m.invMul(a, b) } -> std::convertible_to<typename M::Value>;
+};
+
+template <class R, class T>
+concept range_of = std::ranges::forward_range<R> &&
+	std::same_as<std::ranges::range_value_t<R>, T>;
+
+
+template <class M>
+concept free_monoid = monoid<M> && requires(const M &m, const M::Value &a) {
+	typename M::Symbol;
+	//requires symbol<typename M::Symbol>;
+	{ m.gen(a) } -> range_of<typename M::Symbol>;
+};
+
+template <class T>
+concept OStreamable = requires(std::ostream& os, const T& t) {
+    { os << t } -> std::convertible_to<std::ostream&>;
 };
 
 }	  // namespace fl

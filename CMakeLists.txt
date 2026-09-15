@@ -28,6 +28,7 @@ set(FL_TARGETS
 	#regex3 
 	langdef
 	replace_test
+	monoid_test
 )
 
 foreach(target IN LISTS FL_TARGETS)
@@ -35,7 +36,7 @@ foreach(target IN LISTS FL_TARGETS)
 		tests/${target}.cpp
 	)
 	target_link_libraries(${target} PRIVATE lang)
-	target_compile_options(${target} PRIVATE ${COMPILE_ARGS})
+	target_compile_options(${target} PRIVATE ${COMPILE_ARGS} $<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-c2y-extensions>)
 	target_link_options(${target} PRIVATE ${COMPILE_ARGS})
 	target_include_directories(${target} PRIVATE ./include/)
 	set_target_properties(${target} PROPERTIES
@@ -46,16 +47,16 @@ endforeach()
 
 enable_testing()
 add_test(NAME dpda_test
-         COMMAND dpda_test 
-		 DEPENDS dpda_test)
+	COMMAND dpda_test 
+	DEPENDS dpda_test)
 
 add_test(NAME cfg_test
-         COMMAND cfg_test 
-		 DEPENDS cfg_test)
+	COMMAND cfg_test 
+	DEPENDS cfg_test)
 
 
 add_custom_target(DPDA_check COMMAND ${CMAKE_CTEST_COMMAND}
-                  DEPENDS cfg_test dpda_test)
+	DEPENDS cfg_test dpda_test)
 
 #add_library(DPDA STATIC
 #	DPDA/language.cpp
