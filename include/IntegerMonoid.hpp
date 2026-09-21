@@ -4,17 +4,22 @@
 
 namespace fl {
 
-template <class int_type = uint64_t>
+template <std::integral int_type = uint64_t>
 class IntegerMonoid {
    public:
 	using Value = int_type;
 
 	static constexpr Value identity = 0;
-	constexpr Value mul(Value a, Value b) const { return a + b; }
-	constexpr Value invMul(Value a, Value b) const { return b - a; }
-	constexpr Value gen(Value a) const { return a; }
-	constexpr bool equal(Value a, Value b) const { return a == b; }
-	constexpr std::size_t hash(Value a) const { return std::hash<Value>{}(a); }
+	constexpr Value		   mul(Value a, Value b) const { return a + b; }
+	constexpr Value		   invMul(Value a, Value b) const { return b - a; }
+	constexpr Value		   gen(Value a) const { return a; }
+	constexpr bool		   equal(Value a, Value b) const { return a == b; }
+	constexpr std::size_t  hash(Value a) const { return std::hash<Value>{}(a); }
+
+	template <class T>
+	constexpr Value own(const IntegerMonoid<T> &, IntegerMonoid<T>::Value a) const {
+		return T(a);
+	}
 };
 
 }	  // namespace fl

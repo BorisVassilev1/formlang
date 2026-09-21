@@ -17,10 +17,11 @@ namespace fl {
 /// Expanded FST
 ///		(FST with only single letter or epsilon on the input tape)
 ///	If the input tape is never epsilon, then this is a realtime FST (non-deterministic)
-template <symbol Symbol>
+template <free_monoid M>
 class ExpandedFST {
    public:
 	using State	   = unsigned int;
+	using Symbol   = M::Symbol;
 	using StringID = typename WordSet<Symbol>::WordID;
 
 	using Map = unordered_multimap<State, std::tuple<Symbol, StringID, State>>;
@@ -232,23 +233,22 @@ class ExpandedFST {
 };
 
 template <class Symbol>
-auto expandFST(FST<Symbol> &&fst) {
-	ExpandedFST<Symbol> expanded;
-	using State		 = ExpandedFST<Symbol>::State;
-	using StringID	 = ExpandedFST<Symbol>::StringID;
+auto expandFST(StringFST<Symbol> &&fst) {
+	ExpandedFST<KleeneMonoid<Symbol>> expanded;
+	using State		 = ExpandedFST<KleeneMonoid<Symbol>>::State;
+	using StringID	 = ExpandedFST<KleeneMonoid<Symbol>>::StringID;
 	expanded.N		 = fst.N;
 	expanded.qFirsts = std::move(fst.qFirsts);
 	expanded.qFinals = std::move(fst.qFinals);
 
 	for (const auto &[from, value] : fst.transitions) {
-		auto [id1, id2, to] = value;
-		auto &w2			= fst.words[id2];
-		if (id1 == 0) {
+		const auto &[label, to] = value;
+		auto [w1, w2]			= fst.monoid.gen(label);
+		if (fst.template isIdentityOnTape<0>(label)) {
 			auto new_id = expanded.words.addWord(w2);
 			expanded.addTransition(from, Symbol::eps, new_id, to);
 			continue;
 		}
-		auto &w1   = fst.words[id1];
 		State prev = from;
 
 		if (w1.size() < w2.size()) {	 // |w1| < |w2|
@@ -298,9 +298,9 @@ void drawFSA(const ExpandedFST<Symbol> &fsa) {
 
 // https://lml.bas.bg/~stoyan/finite-state-techniques.pdf#theorem.4.4.8
 template <class Symbol>
-auto removeUpperEpsilonFST(ExpandedFST<Symbol> &&fsa) {
-	using State	   = ExpandedFST<Symbol>::State;
-	using StringID = ExpandedFST<Symbol>::StringID;
+auto removeUpperEpsilonFST(ExpandedFST<KleeneMonoid<Symbol>> &&fsa) {
+	using State	   = ExpandedFST<KleeneMonoid<Symbol>>::State;
+	using StringID = ExpandedFST<KleeneMonoid<Symbol>>::StringID;
 
 	std::stack<int>													 stack;
 	std::vector<bool>												 visited(fsa.N, false);
@@ -346,7 +346,7 @@ auto removeUpperEpsilonFST(ExpandedFST<Symbol> &&fsa) {
 		return w1 == Symbol::eps;	  // remove epsilon transitions
 	});
 
-	typename ExpandedFST<Symbol>::Map new_transitions;
+	typename ExpandedFST<KleeneMonoid<Symbol>>::Map new_transitions;
 	for (State q1 = 0; q1 < fsa.N; ++q1) {
 		for (const auto &[q_, u] : closure[q1]) {
 			auto [i1, i2] = fsa.transitions.equal_range(q_);
@@ -369,7 +369,7 @@ auto removeUpperEpsilonFST(ExpandedFST<Symbol> &&fsa) {
 }
 
 template <class Symbol>
-auto trimFSA(ExpandedFST<Symbol> &&fsa) {
+auto trimFSA(ExpandedFST<KleeneMonoid<Symbol>> &&fsa) {
 	if (fsa.qFinals.empty()) {
 		fsa.N		= 0;
 		fsa.qFirsts = {0};
@@ -378,8 +378,8 @@ auto trimFSA(ExpandedFST<Symbol> &&fsa) {
 		fsa.transitions.clear();
 		return std::move(fsa);
 	}
-	using State	   = FST<Symbol>::State;
-	using StringID = FST<Symbol>::StringID;
+	using State	   = ExpandedFST<KleeneMonoid<Symbol>>::State;
+	using StringID = ExpandedFST<KleeneMonoid<Symbol>>::StringID;
 	std::vector<bool> visited_back(fsa.N, false);
 	std::vector<bool> visited_forw(fsa.N, false);
 
@@ -446,7 +446,7 @@ auto trimFSA(ExpandedFST<Symbol> &&fsa) {
 		return std::move(fsa);
 	}
 
-	ExpandedFST<Symbol> new_fsa;
+	ExpandedFST<KleeneMonoid<Symbol>> new_fsa;
 	new_fsa.N = cnt;
 	new_fsa.qFirsts.reserve(fsa.qFirsts.size());
 	for (const auto &q : fsa.qFirsts) {
@@ -495,19 +495,21 @@ auto trimFSA(ExpandedFST<Symbol> &&fsa) {
 }
 
 template <symbol Symbol>
-auto realtimeFST(FST<Symbol> &&fst) {
+auto realtimeFST(StringFST<Symbol> &&fst) {
 	return trimFSA(removeUpperEpsilonFST(expandFST(removeEpsilonFST(trimFSA(std::move(fst))))));
 }
 
 /// Pseudo-determinization of an Expanded FST that has to be real-time
-template <symbol Symbol>
-auto pseudoDeterminizeFST(ExpandedFST<Symbol> &&fst) {
-	using State = ExpandedFST<Symbol>::State;
+template <free_monoid M>
+auto pseudoDeterminizeFST(ExpandedFST<M> &&fst) {
+	using Symbol   = typename M::Symbol;
+	using State	   = typename ExpandedFST<M>::State;
+	using StringID = typename ExpandedFST<M>::StringID;
 
 	using BigState	= std::vector<State>;
-	using BigLetter = std::tuple<Symbol, typename UniqueWordSet<Symbol>::WordID>;
+	using BigLetter = std::tuple<Symbol, StringID>;
 
-	ExpandedFST<Symbol>									dfa;
+	ExpandedFST<M>										dfa;
 	std::vector<std::reference_wrapper<const BigState>> states;
 	unordered_map<BigState, State>						state_map;
 	std::queue<State>									queue;

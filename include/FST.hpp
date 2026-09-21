@@ -13,40 +13,75 @@
 #include "regexParser.hpp"
 #include "pipes.hpp"
 #include "regexParser.hpp"
+#include "CartesianMonoid.hpp"
+#include "KleeneMonoid.hpp"
 
 namespace fl {
 
 // Classical Finite State Transducer (FST) class template
-template <symbol Symbol>
+//
+// A transition carries a single value of a cartesian monoid combining the two
+// tapes (input/output words over Symbol) instead of an ad hoc pair of indices
+// into a hand-rolled word pool: Monoid::Value plays the role that the old
+// {StringID, StringID} tuple used to play, and KleeneMonoid<Symbol> is the
+// (interning) pool for each tape.
+template <free_monoid I, monoid M>
 class FST {
    public:
-	using State	   = unsigned int;
-	using StringID = unsigned int;
-	using Map	   = unordered_multimap<State, std::tuple<StringID, StringID, State>, fl::hash<State>>;
+	using Symbol = I::Symbol;
+	using State	 = unsigned int;
+	using Monoid = std::conditional_t<std::is_same_v<M, I>, DiagonalMonoid<I>, CartesianMonoid<I, M>>;
+
+	using Value = typename Monoid::Value;
+	using Map	= unordered_multimap<State, std::tuple<Value, State>, fl::hash<State>>;
 	unsigned int						  N;
 	unordered_set<State, fl::hash<State>> qFirsts;
 	unordered_set<State, fl::hash<State>> qFinals;
 
-	std::vector<std::vector<Symbol>> words;		// words on the tapes
-	Map								 transitions;
+	Monoid monoid;	   // owns the interning pools for both tapes
+	Map	   transitions;
 
-	constexpr FST() : N(0) {}
+	constexpr FST()
+		requires(std::is_default_constructible_v<Monoid>)
+		: N(0), monoid() {}
 
-	void addTransition(State from, std::vector<Symbol> &&w1, std::vector<Symbol> &&w2, State to) {
-		StringID id1;
-		if (w1.empty()) id1 = 0;
-		else {
-			id1 = words.size();
-			words.emplace_back(std::move(w1));
-		}
-		StringID id2;
-		if (w2.empty()) id2 = 0;
-		else if (words.back() == w2) id2 = id1;
-		else {
-			id2 = words.size();
-			words.emplace_back(std::move(w2));
-		}
-		transitions.insert({from, {id1, id2, to}});
+	constexpr FST(const FST &)			  = default;
+	constexpr FST(FST &&)				  = default;
+	constexpr FST &operator=(const FST &) = default;
+	constexpr FST &operator=(FST &&)	  = default;
+
+	explicit constexpr FST(Monoid &&m) : N(0), monoid(std::move(m)) {}
+	explicit constexpr FST(const Monoid &m) : N(0), monoid(m) {}
+
+	// void addTransition(State from, std::vector<Symbol> &&w1, std::vector<Symbol> &&w2, State to) {
+	//	auto v1 = monoid.template getMonoid<0>().create(std::span<const Symbol>(w1.data(), w1.size()));
+	//	auto v2 = monoid.template getMonoid<1>().create(std::span<const Symbol>(w2.data(), w2.size()));
+	//	transitions.insert({from, {Value(v1, v2), to}});
+	// }
+
+	void addTransition(State from, const Value &label, State to) { transitions.insert({from, {std::move(label), to}}); }
+	void addTransition(State from, const I::Value &in, const M::Value &out, State to) {
+		transitions.insert({from, {{std::move(in), std::move(out)}, to}});
+	}
+
+	/// re-creates a value that was produced by a different (but structurally
+	/// identical) monoid instance inside this FST's own monoid, so that
+	/// transitions can be merged across FSTs built independently (e.g. when
+	/// combining two automata into a union/concatenation).
+	Value reintern(const Monoid &src, const Value &v) {
+		auto [w1, w2] = src.gen(v);
+		return Value(monoid.template getMonoid<0>().create(w1), monoid.template getMonoid<1>().create(w2));
+	}
+
+	/// whether the label is the identity of the I-th tape's monoid (i.e. that tape reads/writes epsilon)
+	template <std::size_t i>
+	bool isIdentityOnTape(const Value &v) const {
+		return monoid.template getMonoid<i>().equal(std::get<i>(v), std::get<i>(Monoid::identity));
+	}
+
+	/// total number of distinct words interned across both tapes' pools (diagnostic use only)
+	std::size_t wordCount() const {
+		return monoid.template getMonoid<0>().totalWordCount() + monoid.template getMonoid<1>().totalWordCount();
 	}
 
 	void print(std::ostream &out) const {
@@ -62,17 +97,27 @@ class FST {
 			out << "  init -> " << i << " [style=dotted];\n";	  // initial states
 		}
 		for (const auto &[from, second] : transitions) {
-			const auto &[id1, id2, to] = second;
-			out << "  " << from << " -> " << to << " [label=\"<" << words[id1] << ", " << words[id2] << ">\"];\n";
+			const auto &[label, to] = second;
+			auto [w1, w2]			= monoid.gen(label);
+			out << "  " << from << " -> " << to << " [label=\"<";
+			for (const auto &c : w1)
+				out << c;
+			out << ", ";
+			for (const auto &c : w2)
+				out << c;
+			out << ">\"];\n";
 		}
 		out << "}\n";
 	}
 };
 
+template <symbol Symbol>
+using StringFST = FST<KleeneMonoid<Symbol>, KleeneMonoid<Symbol>>;
+
 // Berry-Sethi constructions
 
 template <class Symbol>
-class BS_FSA : public FST<Symbol> {
+class BS_FSA : public StringFST<Symbol> {
    public:
 };
 
@@ -83,16 +128,17 @@ class BS_WordFSA : public BS_FSA<Symbol> {
 		this->N		  = 2;
 		this->qFirsts = {0};
 		this->qFinals = {1};
-		this->words.push_back({});
-		this->addTransition(*this->qFirsts.begin(), std::move(word1), std::move(word2), 1);
+		this->addTransition(*this->qFirsts.begin(), this->monoid.template getMonoid<0>().create(word1),
+							this->monoid.template getMonoid<1>().create(word2), 1);
 	}
 };
 
 template <class Symbol>
 class BS_UnionFSA : public BS_FSA<Symbol> {
    public:
-	using State	   = FST<Symbol>::State;
-	using StringID = FST<Symbol>::StringID;
+	using State	 = StringFST<Symbol>::State;
+	using Monoid = StringFST<Symbol>::Monoid;
+	using Value	 = StringFST<Symbol>::Value;
 
 	BS_UnionFSA(BS_FSA<Symbol> &&fst1, BS_FSA<Symbol> &&fst2) : BS_FSA<Symbol>() {
 		if (fst1.qFinals.empty() && fst2.qFinals.empty()) {
@@ -100,10 +146,10 @@ class BS_UnionFSA : public BS_FSA<Symbol> {
 			this->qFirsts = {0};
 			return;
 		} else if (fst1.qFinals.empty()) {
-			(FST<Symbol> &)(*this) = std::move(fst2);
+			(StringFST<Symbol> &)(*this) = std::move(fst2);
 			return;
 		} else if (fst2.qFinals.empty()) {
-			(FST<Symbol> &)(*this) = std::move(fst1);
+			(StringFST<Symbol> &)(*this) = std::move(fst1);
 			return;
 		}
 
@@ -128,27 +174,20 @@ class BS_UnionFSA : public BS_FSA<Symbol> {
 		State newFinal = this->N - 1;
 		this->qFirsts  = std::move(fst1.qFirsts);
 
+		this->monoid	  = std::move(fst1.monoid);
 		this->transitions = std::move(fst1.transitions);
 		if (canOptimizeFinals)
 			for (auto &[from, value] : this->transitions) {
-				auto &[id1, id2, to] = value;
+				auto &[label, to] = value;
 				if (fst1.qFinals.contains(to)) { to = newFinal; }
 			}
 		for (const auto &[from, value] : fst2.transitions) {
-			const auto &[id1, id2, to] = value;
-			State new_from			   = from + fst1.N - 1;
+			const auto &[label, to] = value;
+			State new_from			= from + fst1.N - 1;
 			if (from == 0) new_from = 0;
-			StringID new_id1 = id1 ? id1 + fst1.words.size() - 1 : 0;
-			StringID new_id2 = id2 ? id2 + fst1.words.size() - 1 : 0;
-			State	 new_to	 = to + fst1.N - 1;
+			State new_to = to + fst1.N - 1;
 			if (canOptimizeFinals && fst2.qFinals.contains(to)) new_to = newFinal;
-			this->transitions.insert({new_from, {new_id1, new_id2, new_to}});
-		}
-
-		this->words = std::move(fst1.words);
-		this->words.reserve(this->words.size() + fst2.words.size());
-		for (auto it = ++fst2.words.begin(); it != fst2.words.end(); ++it) {
-			this->words.push_back(std::move(*it));
+			this->transitions.insert({new_from, {this->reintern(fst2.monoid, label), new_to}});
 		}
 
 		if (canOptimizeFinals) {
@@ -165,8 +204,9 @@ class BS_UnionFSA : public BS_FSA<Symbol> {
 template <class Symbol>
 class BS_ConcatFSA : public BS_FSA<Symbol> {
    public:
-	using State	   = FST<Symbol>::State;
-	using StringID = FST<Symbol>::StringID;
+	using State	 = StringFST<Symbol>::State;
+	using Monoid = StringFST<Symbol>::Monoid;
+	using Value	 = StringFST<Symbol>::Value;
 
 	BS_ConcatFSA(BS_FSA<Symbol> &&fsa1, BS_FSA<Symbol> &&fsa2) : BS_FSA<Symbol>() {
 		//: BS_FSA<Symbol>(false) {
@@ -179,34 +219,25 @@ class BS_ConcatFSA : public BS_FSA<Symbol> {
 		this->qFirsts = std::move(fsa1.qFirsts);
 
 		// all transitions from fsa1
+		this->monoid	  = std::move(fsa1.monoid);
 		this->transitions = std::move(fsa1.transitions);
 		// add transitions from fsa2, removing the initial state of fsa2
 		auto fsa1_final = fsa1.qFinals.begin();
 		for (const auto &[from, value] : fsa2.transitions) {
-			const auto &[id1, id2, to] = value;
-			State new_from			   = from + fsa1.N - 1;
+			const auto &[label, to] = value;
+			State new_from			= from + fsa1.N - 1;
 			if (from == 0) new_from = *fsa1_final;
-			StringID new_id1 = id1 ? id1 + fsa1.words.size() - 1 : 0;
-			StringID new_id2 = id2 ? id2 + fsa1.words.size() - 1 : 0;
-			this->transitions.insert({new_from, {new_id1, new_id2, to + fsa1.N - 1}});
+			this->transitions.insert({new_from, {this->reintern(fsa2.monoid, label), to + fsa1.N - 1}});
 		}
 
 		++fsa1_final;
 		for (; fsa1_final != fsa1.qFinals.end(); ++fsa1_final) {
 			auto [i1, i2] = fsa2.transitions.equal_range(0);
 			for (auto it = i1; it != i2; ++it) {
-				const auto &[_, value]	   = *it;
-				const auto &[id1, id2, to] = value;
-				StringID new_id1		   = id1 ? id1 + fsa1.words.size() - 1 : 0;
-				StringID new_id2		   = id2 ? id2 + fsa1.words.size() - 1 : 0;
-				this->transitions.insert({*fsa1_final, {new_id1, new_id2, to + fsa1.N - 1}});
+				const auto &[_, value]	= *it;
+				const auto &[label, to] = value;
+				this->transitions.insert({*fsa1_final, {this->reintern(fsa2.monoid, label), to + fsa1.N - 1}});
 			}
-		}
-
-		this->words = std::move(fsa1.words);
-		this->words.reserve(this->words.size() + fsa2.words.size());
-		for (auto it = ++fsa2.words.begin(); it != fsa2.words.end(); ++it) {
-			this->words.push_back(std::move(*it));
 		}
 
 		if (fsa2.qFinals.contains(*fsa2.qFirsts.begin())) { this->qFinals = std::move(fsa1.qFinals); }
@@ -230,21 +261,20 @@ class BS_KleeneStarFSA : public BS_FSA<Symbol> {
 		this->N		  = fsa.N;
 		this->qFirsts = std::move(fsa.qFirsts);
 
+		this->monoid	  = std::move(fsa.monoid);
 		this->transitions = std::move(fsa.transitions);
 
 		auto [i1, i2] = this->transitions.equal_range(0);
-		typename FST<Symbol>::Map toAdd;
+		typename StringFST<Symbol>::Map toAdd;
 		for (auto it = i1; it != i2; ++it) {
-			const auto &[_, value]	   = *it;
-			const auto &[id1, id2, to] = value;
+			const auto &[_, value]	= *it;
+			const auto &[label, to] = value;
 
 			for (const auto &f : fsa.qFinals) {
-				toAdd.insert({f, {id1, id2, to}});	   // add transitions from final states to initial state
+				toAdd.insert({f, {label, to}});		// add transitions from final states to initial state
 			}
 		}
 		this->transitions.insert(toAdd.begin(), toAdd.end());
-
-		this->words = std::move(fsa.words);
 
 		this->qFinals = std::move(fsa.qFinals);
 		if (includeEpsilon) this->qFinals.insert(0);	 // add the new initial state as a final state
@@ -273,31 +303,32 @@ BS_FSA<Symbol> makeFSA_BerriSethi(rgx::Regex &regex) {
 // Thompson's construction
 
 template <class Symbol>
-class TH_WordFSA : public FST<Symbol> {
+class TH_WordFSA : public StringFST<Symbol> {
    public:
-	TH_WordFSA(std::vector<Symbol> &&word1, std::vector<Symbol> &&word2) : FST<Symbol>() {
+	TH_WordFSA(std::vector<Symbol> &&word1, std::vector<Symbol> &&word2) : StringFST<Symbol>() {
 		this->N		  = 2;
 		this->qFirsts = {0};
 		this->qFinals = {1};
-		this->words.push_back({});
-		this->addTransition(*this->qFirsts.begin(), std::move(word1), std::move(word2), 1);
+		this->addTransition(*this->qFirsts.begin(), this->monoid.template getMonoid<0>().create(word1),
+							this->monoid.template getMonoid<1>().create(word2), 1);
 	}
 };
 
 template <class Symbol>
-class TH_UnionFSA : public FST<Symbol> {
+class TH_UnionFSA : public StringFST<Symbol> {
    public:
-	TH_UnionFSA(FST<Symbol> &&fst1, FST<Symbol> &&fst2) : FST<Symbol>() {
+	using Monoid = StringFST<Symbol>::Monoid;
+
+	TH_UnionFSA(StringFST<Symbol> &&fst1, StringFST<Symbol> &&fst2) : StringFST<Symbol>() {
 		if (fst1.qFinals.empty() && fst2.qFinals.empty()) {
 			this->N		  = 0;
 			this->qFirsts = {0};
-			this->words.push_back({});
 			return;
 		} else if (fst1.qFinals.empty()) {
-			(FST<Symbol> &)(*this) = std::move(fst2);
+			(StringFST<Symbol> &)(*this) = std::move(fst2);
 			return;
 		} else if (fst2.qFinals.empty()) {
-			(FST<Symbol> &)(*this) = std::move(fst1);
+			(StringFST<Symbol> &)(*this) = std::move(fst1);
 			return;
 		}
 
@@ -305,41 +336,33 @@ class TH_UnionFSA : public FST<Symbol> {
 		this->qFirsts = {this->N - 2};
 		this->qFinals = {this->N - 1};
 
+		this->monoid	  = std::move(fst1.monoid);
 		this->transitions = std::move(fst1.transitions);
 		for (const auto &[from, value] : fst2.transitions) {
-			const auto &[id1, id2, to] = value;
-			int new_id1				   = id1 + fst1.words.size() - 1;
-			int new_id2				   = id2 + fst1.words.size() - 1;
-			if (id1 == 0) new_id1 = 0;
-			if (id2 == 0) new_id2 = 0;
-			this->transitions.insert({from + fst1.N, {new_id1, new_id2, to + fst1.N}});
+			const auto &[label, to] = value;
+			this->transitions.insert({from + fst1.N, {this->reintern(fst2.monoid, label), to + fst1.N}});
 		}
 
 		for (const auto &q : fst1.qFinals) {
-			this->transitions.insert({q, {0, 0, this->N - 1}});
+			this->transitions.insert({q, {Monoid::identity, this->N - 1}});
 		}
 		for (const auto &q : fst2.qFinals) {
-			this->transitions.insert({q + fst1.N, {0, 0, this->N - 1}});
+			this->transitions.insert({q + fst1.N, {Monoid::identity, this->N - 1}});
 		}
-		this->transitions.insert({*this->qFirsts.begin(), {0, 0, *fst1.qFirsts.begin()}});
-		this->transitions.insert({*this->qFirsts.begin(), {0, 0, *fst2.qFirsts.begin() + fst1.N}});
-
-		this->words = std::move(fst1.words);
-		this->words.reserve(this->words.size() + fst2.words.size());
-		for (auto it = ++fst2.words.begin(); it != fst2.words.end(); ++it) {
-			this->words.push_back(std::move(*it));
-		}
+		this->transitions.insert({*this->qFirsts.begin(), {Monoid::identity, *fst1.qFirsts.begin()}});
+		this->transitions.insert({*this->qFirsts.begin(), {Monoid::identity, *fst2.qFirsts.begin() + fst1.N}});
 	}
 };
 
 template <class Symbol>
-class TH_ConcatFSA : public FST<Symbol> {
+class TH_ConcatFSA : public StringFST<Symbol> {
    public:
-	TH_ConcatFSA(FST<Symbol> &&fst1, FST<Symbol> &&fst2) {
+	using Monoid = StringFST<Symbol>::Monoid;
+
+	TH_ConcatFSA(StringFST<Symbol> &&fst1, StringFST<Symbol> &&fst2) {
 		if (fst1.qFinals.empty() || fst2.qFinals.empty()) {
 			this->N		  = 0;
 			this->qFirsts = {0};
-			this->words.push_back({});
 			return;
 		}
 
@@ -350,36 +373,28 @@ class TH_ConcatFSA : public FST<Symbol> {
 			this->qFinals.insert(q + fst1.N);
 		}
 
+		this->monoid	  = std::move(fst1.monoid);
 		this->transitions = std::move(fst1.transitions);
 		for (const auto &[from, value] : fst2.transitions) {
-			const auto &[id1, id2, to] = value;
-			int new_id1				   = id1 + fst1.words.size() - 1;
-			int new_id2				   = id2 + fst1.words.size() - 1;
-			if (id1 == 0) new_id1 = 0;
-			if (id2 == 0) new_id2 = 0;
-			this->transitions.insert({from + fst1.N, {new_id1, new_id2, to + fst1.N}});
+			const auto &[label, to] = value;
+			this->transitions.insert({from + fst1.N, {this->reintern(fst2.monoid, label), to + fst1.N}});
 		}
 
 		for (const auto &q : fst1.qFinals) {
-			this->transitions.insert({q, {0, 0, *fst2.qFirsts.begin() + fst1.N}});
-		}
-
-		this->words = std::move(fst1.words);
-		this->words.reserve(this->words.size() + fst2.words.size());
-		for (auto it = ++fst2.words.begin(); it != fst2.words.end(); ++it) {
-			this->words.push_back(std::move(*it));
+			this->transitions.insert({q, {Monoid::identity, *fst2.qFirsts.begin() + fst1.N}});
 		}
 	}
 };
 
 template <class Symbol>
-class TH_KleeneStarFSA : public FST<Symbol> {
+class TH_KleeneStarFSA : public StringFST<Symbol> {
    public:
-	TH_KleeneStarFSA(FST<Symbol> &&fst, bool includeEpsilon = true) {
+	using Monoid = StringFST<Symbol>::Monoid;
+
+	TH_KleeneStarFSA(StringFST<Symbol> &&fst, bool includeEpsilon = true) {
 		if (fst.qFinals.empty()) {
 			this->N		  = 0;
 			this->qFirsts = {0};
-			this->words.push_back({});
 			return;
 		}
 
@@ -387,20 +402,19 @@ class TH_KleeneStarFSA : public FST<Symbol> {
 		this->qFirsts = {this->N - 2};
 		this->qFinals = {this->N - 1};
 
+		this->monoid	  = std::move(fst.monoid);
 		this->transitions = std::move(fst.transitions);
 		for (const auto &q : fst.qFinals) {
-			this->transitions.insert({q, {0, 0, this->N - 1}});
-			this->transitions.insert({q, {0, 0, *fst.qFirsts.begin()}});
+			this->transitions.insert({q, {Monoid::identity, this->N - 1}});
+			this->transitions.insert({q, {Monoid::identity, *fst.qFirsts.begin()}});
 		}
-		this->transitions.insert({*this->qFirsts.begin(), {0, 0, *fst.qFirsts.begin()}});
-		if (includeEpsilon) this->transitions.insert({*this->qFirsts.begin(), {0, 0, this->N - 1}});
-
-		this->words = std::move(fst.words);
+		this->transitions.insert({*this->qFirsts.begin(), {Monoid::identity, *fst.qFirsts.begin()}});
+		if (includeEpsilon) this->transitions.insert({*this->qFirsts.begin(), {Monoid::identity, this->N - 1}});
 	}
 };
 
 template <class Symbol>
-FST<Symbol> makeFSA_Thompson(rgx::Regex &regex) {
+StringFST<Symbol> makeFSA_Thompson(rgx::Regex &regex) {
 	using namespace rgx;
 	if (auto *r = dynamic_cast<TupleRegex<char> *>(&regex)) {
 		return TH_WordFSA<Symbol>(toSymbol<Symbol>(std::move(r->left)), toSymbol<Symbol>(std::move(r->right)));
@@ -417,19 +431,18 @@ FST<Symbol> makeFSA_Thompson(rgx::Regex &regex) {
 }
 
 template <class Symbol>
-class StupidUnionFSA : public FST<Symbol> {
+class StupidUnionFSA : public StringFST<Symbol> {
    public:
-	StupidUnionFSA(FST<Symbol> &&fst1, FST<Symbol> &&fst2) {
+	StupidUnionFSA(StringFST<Symbol> &&fst1, StringFST<Symbol> &&fst2) {
 		if (fst1.qFinals.empty() && fst2.qFinals.empty()) {
 			this->N		  = 0;
 			this->qFirsts = {0};
-			this->words.push_back({});
 			return;
 		} else if (fst1.qFinals.empty()) {
-			(FST<Symbol> &)(*this) = std::move(fst2);
+			(StringFST<Symbol> &)(*this) = std::move(fst2);
 			return;
 		} else if (fst2.qFinals.empty()) {
-			(FST<Symbol> &)(*this) = std::move(fst1);
+			(StringFST<Symbol> &)(*this) = std::move(fst1);
 			return;
 		}
 
@@ -443,26 +456,17 @@ class StupidUnionFSA : public FST<Symbol> {
 			this->qFinals.insert(q + fst1.N);
 		}
 
+		this->monoid	  = std::move(fst1.monoid);
 		this->transitions = std::move(fst1.transitions);
 		for (const auto &[from, value] : fst2.transitions) {
-			const auto &[id1, id2, to] = value;
-			int new_id1				   = id1 + fst1.words.size() - 1;
-			int new_id2				   = id2 + fst1.words.size() - 1;
-			if (id1 == 0) new_id1 = 0;
-			if (id2 == 0) new_id2 = 0;
-			this->transitions.insert({from + fst1.N, {new_id1, new_id2, to + fst1.N}});
-		}
-
-		this->words = std::move(fst1.words);
-		this->words.reserve(this->words.size() + fst2.words.size());
-		for (auto it = ++fst2.words.begin(); it != fst2.words.end(); ++it) {
-			this->words.push_back(std::move(*it));
+			const auto &[label, to] = value;
+			this->transitions.insert({from + fst1.N, {this->reintern(fst2.monoid, label), to + fst1.N}});
 		}
 	}
 };
 
 template <class Symbol>
-void drawFSA(const FST<Symbol> &fsa) {
+void drawFSA(const StringFST<Symbol> &fsa) {
 	ShellProcess p("dot -Tsvg > a.svg && feh ./a.svg");
 	fsa.print(p.in());
 	p.in() << std::endl;
@@ -473,7 +477,7 @@ void drawFSA(const FST<Symbol> &fsa) {
 }
 
 template <class Symbol>
-inline void saveFSA(const FST<Symbol> &fsa, const std::string &filename) {
+inline void saveFSA(const StringFST<Symbol> &fsa, const std::string &filename) {
 	std::ofstream out(filename);
 	if (!out.is_open()) { throw std::runtime_error("Could not open file " + filename + " for writing."); }
 	fsa.print(out);
@@ -481,17 +485,14 @@ inline void saveFSA(const FST<Symbol> &fsa, const std::string &filename) {
 }
 
 template <class Symbol>
-auto trimFSA(FST<Symbol> &&fsa) {
+auto trimFSA(StringFST<Symbol> &&fsa) {
 	if (fsa.qFinals.empty()) {
 		fsa.N		= 0;
 		fsa.qFirsts = {0};
-		fsa.words.clear();
-		fsa.words.push_back({});
 		fsa.transitions.clear();
 		return std::move(fsa);
 	}
-	using State	   = FST<Symbol>::State;
-	using StringID = FST<Symbol>::StringID;
+	using State = StringFST<Symbol>::State;
 	std::vector<bool> visited_back(fsa.N, false);
 	std::vector<bool> visited_forw(fsa.N, false);
 
@@ -500,7 +501,7 @@ auto trimFSA(FST<Symbol> &&fsa) {
 		std::vector<std::vector<State>> backwardTransitions;
 		backwardTransitions.resize(fsa.N);
 		for (const auto &[from, value] : forwardTransitions) {
-			const auto &[id1, id2, to] = value;
+			const auto &[label, to] = value;
 			backwardTransitions[to].push_back(from);
 		}
 
@@ -529,7 +530,7 @@ auto trimFSA(FST<Symbol> &&fsa) {
 			stack.pop_back();
 			auto [i1, i2] = forwardTransitions.equal_range(current);
 			for (const auto &[_, value] : std::ranges::subrange(i1, i2)) {
-				const auto &[id1, id2, to] = value;
+				const auto &[label, to] = value;
 				if (!visited_forw[to]) {
 					visited_forw[to] = true;
 					stack.push_back(to);
@@ -542,7 +543,9 @@ auto trimFSA(FST<Symbol> &&fsa) {
 	for (unsigned int i = 0; i < fsa.N; ++i) {
 		if (visited_back[i] && visited_forw[i]) { new_map[i] = cnt++; }
 	}
-	FST<Symbol> new_fsa;
+	StringFST<Symbol> new_fsa;
+	new_fsa.monoid = std::move(
+		fsa.monoid);	 // word pool entries stay valid regardless of which states/transitions survive trimming
 	new_fsa.N = cnt;
 	new_fsa.qFirsts.reserve(fsa.qFirsts.size());
 	for (const auto &q : fsa.qFirsts) {
@@ -554,33 +557,10 @@ auto trimFSA(FST<Symbol> &&fsa) {
 		if (new_map[q] != -1u) { new_fsa.qFinals.insert(new_map[q]); }
 	}
 
-	std::vector<bool> words_used(fsa.words.size(), false);
-	words_used[0] = true;	  // always keep the empty word
 	for (const auto &[from, value] : fsa.transitions) {
-		const auto &[id1, id2, to] = value;
+		const auto &[label, to] = value;
 		if (new_map[from] != -1u && new_map[to] != -1u) {
-			words_used[id1] = true;
-			words_used[id2] = true;
-		}
-	}
-
-	int					  word_cnt = 0;
-	std::vector<StringID> words_index_map(fsa.words.size(), -1);
-	for (size_t i = 0; i < fsa.words.size(); ++i) {
-		if (words_used[i]) {
-			new_fsa.words.push_back(std::move(fsa.words[i]));
-			words_index_map[i] = word_cnt++;
-		}
-	}
-
-	for (const auto &[from, value] : fsa.transitions) {
-		const auto &[id1, id2, to] = value;
-		if (new_map[from] != -1u && new_map[to] != -1u) {
-			State	 new_from = new_map[from];
-			State	 new_to	  = new_map[to];
-			StringID new_id1  = words_index_map[id1];
-			StringID new_id2  = words_index_map[id2];
-			new_fsa.transitions.insert({new_from, {new_id1, new_id2, new_to}});
+			new_fsa.transitions.insert({new_map[from], {label, new_map[to]}});
 		}
 	}
 
@@ -589,8 +569,9 @@ auto trimFSA(FST<Symbol> &&fsa) {
 
 /// gets rid of (epsilon, epsilon) transitions preserving the language of the FST.
 template <class Symbol>
-auto removeEpsilonFST(FST<Symbol> &&fsa) {
-	using State = typename FST<Symbol>::State;
+auto removeEpsilonFST(StringFST<Symbol> &&fsa) {
+	using State	 = typename StringFST<Symbol>::State;
+	using Monoid = typename StringFST<Symbol>::Monoid;
 
 	std::stack<State>				stack;
 	std::vector<bool>				visited(fsa.N, false);
@@ -605,8 +586,8 @@ auto removeEpsilonFST(FST<Symbol> &&fsa) {
 
 			auto [i1, i2] = fsa.transitions.equal_range(current);
 			for (const auto &[_, value] : std::ranges::subrange(i1, i2)) {
-				const auto &[id1, id2, to] = value;
-				if (id1 == 0 && id2 == 0 && !visited[to]) {		// epsilon transition
+				const auto &[label, to] = value;
+				if (fsa.monoid.equal(label, Monoid::identity) && !visited[to]) {	 // epsilon transition
 					stack.push(to);
 					visited[to] = true;
 					closure[i].push_back(to);
@@ -617,19 +598,19 @@ auto removeEpsilonFST(FST<Symbol> &&fsa) {
 		visited.assign(fsa.N, false);
 	}
 
-	std::erase_if(fsa.transitions, [](const auto &pair) {
-		const auto &[from, value]  = pair;
-		const auto &[id1, id2, to] = value;
-		return id1 == 0 && id2 == 0;	 // remove epsilon transitions
+	std::erase_if(fsa.transitions, [&fsa](const auto &pair) {
+		const auto &[from, value] = pair;
+		const auto &[label, to]	  = value;
+		return fsa.monoid.equal(label, Monoid::identity);	  // remove epsilon transitions
 	});
 
-	typename FST<Symbol>::Map new_transitions;
+	typename StringFST<Symbol>::Map new_transitions;
 	new_transitions.insert(fsa.transitions.begin(), fsa.transitions.end());
 	for (const auto &[from, value] : fsa.transitions) {
-		const auto &[id1, id2, to] = value;
-		if (id1 == 0 && id2 == 0) assert(false);
+		const auto &[label, to] = value;
+		assert(!fsa.monoid.equal(label, Monoid::identity));
 		for (const auto &next : closure[to]) {
-			new_transitions.insert({from, {id1, id2, next}});
+			new_transitions.insert({from, {label, next}});
 		}
 	}
 

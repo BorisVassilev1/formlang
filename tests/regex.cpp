@@ -62,11 +62,11 @@ int main(int argc, char **argv) {
 	// generate1M();
 	//
 
-	FST<Letter> fst;
+	StringFST<Letter> fst;
 	// BENCH(fst = makeFSA_BerriSethi<Letter>(*reg), 1, "BENCH makeFSA: ");
 	BENCH(fst = makeFSA_BerriSethi<Letter>(*reg), 1, "BENCH makeFSA Thompson: ");
 	std::cout << "FSA has " << fst.N << " states and " << fst.transitions.size() << " transitions and "
-			  << fst.words.size() << " words." << std::endl;
+			  << fst.wordCount() << " words." << std::endl;
 
 	if (tokens.size() < 1000) { drawFSA(fst); }
 
@@ -78,14 +78,14 @@ int main(int argc, char **argv) {
 	BENCH(fst = removeEpsilonFST<Letter>(std::move(fst));, 1, "BENCH removeEpsilonFST: ");
 	if (tokens.size() < 1000) drawFSA(fst);
 	std::cout << "FSA has " << fst.N << " states and " << fst.transitions.size() << " transitions and "
-			  << fst.words.size() << " words after removing epsilons." << std::endl;
+			  << fst.wordCount() << " words after removing epsilons." << std::endl;
 
 	BENCH(fst = trimFSA<Letter>(std::move(fst));, 1, "BENCH trimFSA again: ");
 	if (tokens.size() < 1000) drawFSA(fst);
 	std::cout << "FSA has " << fst.N << " states and " << fst.transitions.size() << " transitions and "
-			  << fst.words.size() << " words after trimming." << std::endl;
+			  << fst.wordCount() << " words after trimming." << std::endl;
 
-	ExpandedFST<Letter> efst;
+	ExpandedFST<KleeneMonoid<Letter>> efst;
 	BENCH(efst = expandFST<Letter>(std::move(fst));, 1, "BENCH expandFST: ");
 	if (tokens.size() < 1000) drawFSA(efst);
 	std::cout << "Expanded FSA has " << efst.N << " states and " << efst.transitions.size() << " transitions and "

@@ -6,7 +6,7 @@
 namespace fl {
 
 template <class Letter>
-void tarjan(int u, const typename FST<Letter>::Map &transitions);
+void tarjan(int u, const StringFST<Letter> &fst);
 
 static int				 foundat = 1, sccIndex = 0;
 static std::vector<int>	 scc;
@@ -14,18 +14,18 @@ static std::vector<int>	 disc, low;		// init disc to -1
 static std::vector<bool> onstack;		// init to 0
 
 template <class Letter>
-void tarjan(int u, const typename FST<Letter>::Map &transitions) {
+void tarjan(int u, const StringFST<Letter> &fst) {
 	static std::stack<int> st;
 
 	disc[u] = low[u] = foundat++;
 	st.push(u);
 	onstack[u]	   = true;
-	auto [it, end] = transitions.equal_range(u);
+	auto [it, end] = fst.transitions.equal_range(u);
 	for (auto iit = it; iit != end; ++iit) {
-		auto &[id1, id2, i] = iit->second;
-		if (id1 != 0) continue;
+		auto &[label, i] = iit->second;
+		if (!fst.template isIdentityOnTape<0>(label)) continue;
 		if (disc[i] == -1) {
-			tarjan<Letter>(i, transitions);
+			tarjan<Letter>(i, fst);
 			low[u] = std::min(low[u], low[i]);
 		} else if (onstack[i]) low[u] = std::min(low[u], disc[i]);
 	}
@@ -42,7 +42,7 @@ void tarjan(int u, const typename FST<Letter>::Map &transitions) {
 }
 
 template <class Letter>
-bool testInfiniteAmbiguity(const FST<Letter> &fst) {
+bool testInfiniteAmbiguity(const StringFST<Letter> &fst) {
 	// tarjan algorithm to find strongly connected components
 	// we search in the subgraph with transitions only <\varepsilon, w>
 
@@ -53,11 +53,12 @@ bool testInfiniteAmbiguity(const FST<Letter> &fst) {
 	onstack.assign(fst.N, false);
 	scc.assign(fst.N, -1);
 
-	tarjan<Letter>(0, fst.transitions);
+	tarjan<Letter>(0, fst);
 
 	for (const auto &[k, v] : fst.transitions) {
-		auto &[id1, id2, i] = v;
-		if (id1 != 0 || id2 == 0) continue;		// transition is (\varepsilon, w)
+		auto &[label, i] = v;
+		// transition is (\varepsilon, w) with w non-empty
+		if (!fst.template isIdentityOnTape<0>(label) || fst.template isIdentityOnTape<1>(label)) continue;
 		if (i == k) return true;
 		if (i != k && scc[i] == scc[k] && scc[i] != -1) {
 			return true;	 // found a cycle in the epsilon transitions

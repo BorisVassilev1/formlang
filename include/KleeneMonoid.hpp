@@ -266,6 +266,11 @@ class KleeneMonoid {
 	std::span<const S> gen(const TemporaryId &a) const { return get(a); }
 	std::span<const S> gen(const InfixId &a) const { return get(a); }
 
+	Value own(const KleeneMonoid &m, Value a) const { return addUnique(m.get(a));}
+
+
+	// ---------------- methods down from here are not required by the concepts 
+
 	template <std::ranges::viewable_range V>
 	Value create(V &&v) const {
 		return addUnique(v);

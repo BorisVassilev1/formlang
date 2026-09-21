@@ -59,11 +59,12 @@ bool eq(U &&u, V &&v) {
 }
 
 /// expects trimmed real-time FST
-template <class Letter>
-bool isFunctional(const ExpandedFST<Letter> &fst) {
+template <free_monoid M>
+bool isFunctional(const ExpandedFST<M> &fst) {
 	// create the squared putput transducer and compute Adm(q) for every state q in it;
 
-	using State = typename ExpandedFST<Letter>::State;
+	using State	 = typename ExpandedFST<M>::State;
+	using Symbol = typename M::Symbol;
 
 	// check output of empty word
 	int eps_out = -1;
@@ -73,12 +74,12 @@ bool isFunctional(const ExpandedFST<Letter> &fst) {
 		} else if (!std::ranges::equal(fst.words[q], fst.words[eps_out])) return false;
 	}
 
-	unordered_map<std::tuple<State, State>, std::tuple<std::vector<Letter>, std::vector<Letter>>> Adm;
+	unordered_map<std::tuple<State, State>, std::tuple<std::vector<Symbol>, std::vector<Symbol>>> Adm;
 	std::queue<std::tuple<State, State>>														  queue;
 
 	std::vector<bool> coFinals(fst.N * fst.N, false);
 	{
-		std::vector<std::vector<std::tuple<Letter, State>>> reverseTransitions;
+		std::vector<std::vector<std::tuple<Symbol, State>>> reverseTransitions;
 		reverseTransitions.resize(fst.N);
 		for (const auto &[from, rhs] : fst.transitions) {
 			const auto &[l, _, to] = rhs;
@@ -162,7 +163,7 @@ bool isFunctional(const ExpandedFST<Letter> &fst) {
 			auto &[_, value2]  = t2;
 			auto &[l1, id1, i] = value1;
 			auto &[l2, id2, j] = value2;
-			auto [h_1, h_2]	   = w_noref<Letter>(u, v, fst.words[id1], fst.words[id2]);
+			auto [h_1, h_2]	   = w_noref<Symbol>(u, v, fst.words[id1], fst.words[id2]);
 
 			auto q2 = std::tuple(i, j);
 			//  functional(i+1) := ∀(q′, h′) ∈ Dq : (balancible(h′) ∧
@@ -176,7 +177,7 @@ bool isFunctional(const ExpandedFST<Letter> &fst) {
 			if (functional) {
 				if (q2_it == Adm.end()) {
 					queue.push(q2);
-					Adm.insert({{i, j}, {toSymbol<Letter>(h_1), toSymbol<Letter>(h_2)}});
+					Adm.insert({{i, j}, {toSymbol<Symbol>(h_1), toSymbol<Symbol>(h_2)}});
 				}
 			} else {
 				std::cout << "-> \"" << toString(h_1) << "\", \"" << toString(h_2) << "\"" << std::endl;

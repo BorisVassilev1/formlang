@@ -18,7 +18,7 @@ using SSFST_t = SparseSSFST<Letter>;
 auto toSymbol(const char *s) { return fl::toSymbol<Letter>(s); }
 
 void test_determinization() {
-	ExpandedFST<Letter> fsa;
+	ExpandedFST<KleeneMonoid<Letter>> fsa;
 	fsa.N		= 8;
 	fsa.qFirsts = {0, 1};
 	fsa.qFinals = {3, 6, 7};
@@ -51,7 +51,7 @@ void test_determinization() {
 }
 
 void test_bounded_variation() {
-	ExpandedFST<Letter> efst;
+	ExpandedFST<KleeneMonoid<Letter>> efst;
 	efst.N		 = 4;
 	efst.qFirsts = {0};
 	efst.qFinals = {0, 1, 3};
@@ -90,14 +90,14 @@ void test_replace() {
 	std::cout << "Optional replace: " << t << std::endl;
 
 	BENCH(makeFSA_BerriSethi<Letter>(*t), 100, "BENCH makeFSA Berry-Sethi: ");
-	FST<Letter> fst = makeFSA_BerriSethi<Letter>(*t);
+	StringFST<Letter> fst = makeFSA_BerriSethi<Letter>(*t);
 	// fst.print(std::cout);
 
 	BENCH(makeFSA_Thompson<Letter>(*t), 100, "BENCH makeFSA Thompson: ");
 	// auto fst = makeFSA_Thompson<Letter>(*t);
 	// fsa.print(std::cout);
 	std::cout << "FSA has " << fst.N << " states and " << fst.transitions.size() << " transitions and "
-			  << fst.words.size() << " words." << std::endl;
+			  << fst.wordCount() << " words." << std::endl;
 	// fsa.print(std::cout);
 	// drawFSA(fst);
 

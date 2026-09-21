@@ -21,14 +21,14 @@ class OutputFSA {
 
 	constexpr OutputFSA(const std::string_view &regex, Symbol fixedOutput) {
 		auto ast = rgx::parseRegex(std::string(regex));
-		auto fst = (FST<Symbol>)makeFSA_BerriSethi<Symbol>(*ast);
+		auto fst = (StringFST<Symbol>)makeFSA_BerriSethi<Symbol>(*ast);
 		fst		 = trimFSA<Symbol>(std::move(fst));
 
 		auto realtime = realtimeFST<Symbol>(std::move(fst));
-		*this		  = OutputFSA<Symbol>(pseudoDeterminizeFST<Symbol>(std::move(realtime)), fixedOutput);
+		*this		  = OutputFSA<Symbol>(pseudoDeterminizeFST(std::move(realtime)), fixedOutput);
 	}
 
-	OutputFSA(ExpandedFST<Symbol> &&tfsa, Symbol fixedOutput) {
+	OutputFSA(ExpandedFST<KleeneMonoid<Symbol>> &&tfsa, Symbol fixedOutput) {
 		this->N		  = tfsa.N;
 		this->qFinals = std::move(tfsa.qFinals);
 		this->qFirsts = std::move(tfsa.qFirsts);
