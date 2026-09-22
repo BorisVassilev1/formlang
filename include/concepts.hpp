@@ -75,20 +75,18 @@ template <class T>
 concept FSA = monoid<typename T::Monoid> && state<typename T::State> && requires(T t, typename T::State s) {
 	// properties of the transition table
 	{ T::deterministic } -> std::convertible_to<bool>;
-	{ T::sorted_arcs } -> std::convertible_to<bool>; // are arcs comparable as arrays
+	{ T::sorted_arcs } -> std::convertible_to<bool>;	 // are arcs comparable as arrays
 
 	// methods
 	{ t.start() } -> std::same_as<typename T::State>;
 	// sorted or not, deterministic or not, the transitions are always a range of tuples (Symbol, State)
-	{ t.transitions(s) } -> range_of<std::tuple<typename T::Monoid::Symbol, typename T::State>>;
+	{ t.transitions(s) } -> range_of<std::tuple<typename T::Monoid::Value, typename T::State>>;
 	{ t.isFinal(s) } -> std::convertible_to<bool>;
 	{ t.size() } -> std::convertible_to<std::size_t>;
 };
 
 template <class T>
-concept FST = FSA<T> && requires() {
-	{ T::Monoid } -> free_monoid; // this is weak, but good for now
-};
+concept FST = FSA<T> && requires() { free_monoid<typename T::Monoid>; };
 
 template <class T>
 concept SSFST = FST<T> && requires(T t, typename T::State s, typename T::Monoid::Symbol l) {
@@ -96,8 +94,8 @@ concept SSFST = FST<T> && requires(T t, typename T::State s, typename T::Monoid:
 	{ t.psi(s) } -> std::same_as<std::span<const typename T::Monoid::Symbol>>;
 };
 
-//template <class T>
-//concept SSFST =							//
+// template <class T>
+// concept SSFST =							//
 //	symbol<typename T::Letter_t> &&		//
 //	state<typename T::State> &&			//
 //	requires(T t, typename T::Letter_t l, T::State s) {
@@ -115,6 +113,5 @@ template <class T>
 concept SSFSTI = SSFST<T> && requires(T t) {
 	{ &T::initialOutput } -> std::same_as<std::span<const typename T::Letter_t> (T::*)() const>;
 };
-
 
 }	  // namespace fl
