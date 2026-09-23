@@ -31,11 +31,11 @@ class SparseFST {
 	constexpr static bool deterministic = false;
 	constexpr static bool sorted_arcs	= false;
 
-	using Symbol = I::Symbol;
+	using Symbol	   = I::Symbol;
 	using InputMonoid  = I;
 	using OutputMonoid = M;
-	using State	 = unsigned int;
-	using Monoid = std::conditional_t<std::is_same_v<M, I>, DiagonalMonoid<I>, CartesianMonoid<I, M>>;
+	using State		   = unsigned int;
+	using Monoid	   = std::conditional_t<std::is_same_v<M, I>, DiagonalMonoid<I>, CartesianMonoid<I, M>>;
 
 	using Value = typename Monoid::Value;
 	using Map	= unordered_multimap<State, std::tuple<Value, State>, fl::hash<State>>;
@@ -115,15 +115,16 @@ class SparseFST {
 		out << "}\n";
 	}
 
-	const auto	&Initial() const { return qFirsts; }
-	bool		 IsInitial(State q) const { return qFirsts.contains(q); }
-	const auto & Final() const { return qFinals; }
-	bool		 IsFinal(State q) const { return qFinals.contains(q); }
-	std::size_t	 Size() const { return N; }
-	auto Transitions(State q) const {
+	const auto &Initial() const { return qFirsts; }
+	bool		IsInitial(State q) const { return qFirsts.contains(q); }
+	const auto &Final() const { return qFinals; }
+	bool		IsFinal(State q) const { return qFinals.contains(q); }
+	std::size_t Size() const { return N; }
+	auto		Transitions(State q) const {
 		auto [begin, end] = transitions.equal_range(q);
 		return std::ranges::subrange(begin, end) | std::views::values;
 	}
+	const Monoid &GetMonoid() const { return monoid; }
 };
 }	  // namespace fl
 

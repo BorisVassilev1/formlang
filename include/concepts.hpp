@@ -101,6 +101,9 @@ concept FSA = monoid<typename T::Monoid> && state<typename T::State> && requires
 	{ T::deterministic } -> std::convertible_to<bool>;
 	{ T::sorted_arcs } -> std::convertible_to<bool>;	 // are arcs comparable as arrays
 
+	// exposes its monoid instance
+	{ t.GetMonoid() } -> std::same_as<const typename T::Monoid &>;
+
 	// methods
 	{ t.Initial() } -> range_of<typename T::State>;
 	{ t.IsInitial(s) } -> std::convertible_to<bool>;

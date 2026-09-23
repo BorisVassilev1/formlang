@@ -34,7 +34,7 @@ class SparseSSFST {
 
 	// accepts a trimmed ExpandedFST and builds a subsequential finite-state transducer
 	// tests for bounded variation
-	SparseSSFST(ExpandedFST<InterningMonoid<Symbol>> &&fsa, bool resolveNonFunctionality = false) {
+	SparseSSFST(ExpandedFST<Symbol, InterningMonoid<Symbol>> &&fsa, bool resolveNonFunctionality = false) {
 		unsigned int C = 0;
 		for (auto w : fsa.words) {
 			if (w.size() > C) C = w.size();
@@ -314,9 +314,9 @@ class SparseSSFST {
 		std::cout << std::endl;
 	}
 
-	[[clang::always_inline]] inline std::size_t				size() const { return N; }
-	[[clang::always_inline]] inline State					initial() const { return 0; }
-	[[clang::always_inline]] inline bool					isFinal(State s) const { return qFinals.contains(s); }
+	[[clang::always_inline]] inline std::size_t size() const { return N; }
+	[[clang::always_inline]] inline State		initial() const { return 0; }
+	[[clang::always_inline]] inline bool		isFinal(State s) const { return qFinals.contains(s); }
 	[[clang::always_inline]] inline std::pair<std::span<const Symbol>, bool> step(State &s, Symbol l) const {
 		auto it = transitions.find({s, l});
 		if (it == transitions.end()) return std::pair{std::span<const Symbol>{}, false};
@@ -399,7 +399,8 @@ class SparseSSFST {
 	constexpr PackedSparseSSFSTInputOnly<N, T> packInputOnly() const {
 		if (N != this->N) { dbLog(dbg::LOG_ERROR, "SparseSSFST::packInputOnly: N mismatch: ", N, " != ", this->N); }
 		if (T != this->transitions.size()) {
-			dbLog(dbg::LOG_ERROR, "SparseSSFST::packInputOnly: Transitions mismatch: ", T, " != ", this->transitions.size());
+			dbLog(dbg::LOG_ERROR, "SparseSSFST::packInputOnly: Transitions mismatch: ", T,
+				  " != ", this->transitions.size());
 		}
 		PackedSparseSSFSTInputOnly<N, T> packed;
 		packed.first	  = 0;
@@ -480,7 +481,7 @@ static_assert(fl::SSFST<fl::SparseSSFST<fl::Letter>>,
 namespace fl {
 
 template <class Transducer>
-	requires (SSFST<Transducer> && !SSFSTI<Transducer>)
+	requires(SSFST<Transducer> && !SSFSTI<Transducer>)
 class SSFSTTraverser {
 	using Symbol = typename Transducer::Letter_t;
 	using State	 = typename Transducer::State;

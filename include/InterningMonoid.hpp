@@ -28,6 +28,10 @@ class InterningMonoid {
 		constexpr WordId &operator=(const WordId &) = default;
 		constexpr WordId &operator=(WordId &&)		= default;
 
+		// comparison is stateless
+		constexpr bool operator==(const WordId &other) const { return id == other.id; }
+		constexpr bool operator!=(const WordId &other) const { return id != other.id; }
+
 		friend class InterningMonoid<S>;
 	};
 
@@ -283,8 +287,24 @@ class InterningMonoid {
 		return addUnique(std::span<const char>(v, std::strlen(v)));
 	}
 
-	uint32_t temporaryCount() const { return storage->temporaryCount; }
-	uint32_t totalWordCount() const { return nextWordId; }
+	InfixId createInfix(Value a, std::size_t start, std::size_t length) const {
+		auto &[startA, lengthA] = storage->wordsData[a.id];
+		assert(start + length <= lengthA);
+		return {this, startA + static_cast<uint32_t>(start), static_cast<uint32_t>(length)};
+	}
+
+	InfixId createInfix(InfixId a, std::size_t start, std::size_t length) const {
+		assert(start + length <= a.length);
+		return {this, a.start + static_cast<uint32_t>(start), static_cast<uint32_t>(length)};
+	}
+
+	TemporaryId createInfix(TemporaryId a, std::size_t start, std::size_t length) const {
+		assert(start + length <= a.length);
+		return {this, a.start + static_cast<uint32_t>(start), static_cast<uint32_t>(length)};
+	}
+
+	uint32_t	temporaryCount() const { return storage->temporaryCount; }
+	uint32_t	totalWordCount() const { return wordMap.size(); }
 	std::size_t poolByteCount() const { return storage->words.size() * sizeof(S); }
 
 	/// Reclaims the storage of elements that are not in the given ranges
@@ -319,7 +339,7 @@ class InterningMonoid {
 		bool	 haveRun = false;
 		for (uint32_t id : liveIds) {
 			auto &[start, length] = storage->wordsData[id];
-			uint32_t end		   = start + length;
+			uint32_t end		  = start + length;
 			if (!haveRun || start > runOldEnd) {
 				// starts a fresh, disjoint run
 				runOldStart = start;
@@ -349,19 +369,13 @@ class InterningMonoid {
 		}
 	}
 
-	// ---------------- serialization: raw POD dump, no magic/version, same
-	// convention as UniqueWordSet::serialize (see wordset.hpp) -- write
-	// nextWordId, then wordsData verbatim (one entry per id, so its size is
-	// implied by nextWordId), then the words buffer (its length is implied by
-	// the max end offset across wordsData, so it isn't written separately
-	// either).
-
 	const InterningMonoid &serialize(std::ostream &out) const {
 		assert(storage->temporaryCount == 0 &&
 			   "cannot serialize an InterningMonoid while a mul()/invMul() result (TemporaryId/InfixId) is still "
 			   "outstanding -- convert it to a Value first");
 		out.write(reinterpret_cast<const char *>(&nextWordId), sizeof(nextWordId));
-		out.write(reinterpret_cast<const char *>(storage->wordsData.data()), storage->wordsData.size() * sizeof(WordData));
+		out.write(reinterpret_cast<const char *>(storage->wordsData.data()),
+				  storage->wordsData.size() * sizeof(WordData));
 		out.write(reinterpret_cast<const char *>(storage->words.data()), storage->words.size() * sizeof(S));
 		return *this;
 	}

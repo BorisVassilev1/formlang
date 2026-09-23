@@ -1,13 +1,13 @@
 #pragma once
 #include <cassert>
+#include <concepts>
+#include <ios>
 #include <queue>
 
 #include "concepts.hpp"
 #include "pipes.hpp"
 #include "utils.h"
-#include "wordset.hpp"
 #include "TotalSSFT.hpp"
-#include "hashing.hpp"
 
 namespace fl {
 
@@ -19,12 +19,17 @@ namespace fl {
 //
 // the transducer is total, so every state has transitions with each letter.
 template <fl::symbol Symbol, size_t alphabetSize = Symbol::size>
-class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize> {
+class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize, InterningMonoid<Symbol>> {
+	// this code relies heavily on the fact that InterningMonoid::Value can be compared trivially
    public:
-	using State		 = unsigned int;
-	using WordID	 = UniqueWordSet<Symbol>::WordID;
-	using Map		 = TotalSSFT<Symbol, alphabetSize>::Map;
-	using Transition = TotalSSFT<Symbol, alphabetSize>::Transition;
+	using State		   = unsigned int;
+	using Base		   = TotalSSFT<Symbol, alphabetSize, InterningMonoid<Symbol>>;
+	using Map		   = Base::Map;
+	using Transition   = Base::Transition;
+	using InputMonoid  = Base::InputMonoid;
+	using OutputMonoid = Base::OutputMonoid;
+
+	using OutValue = typename OutputMonoid::Value;
 
 	/// @brief A rule _<left>_<right>_ -> _<left><right>_
 	struct Rule {
@@ -35,14 +40,14 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize> {
 	struct RuleMetadata {
 		std::vector<Symbol> match;
 		size_t				markerIndex;
-		WordID				rightHalfID;
+		OutValue			rightHalfID;
 
-		RuleMetadata(Rule &&rule, const Symbol &marker, UniqueWordSet<Symbol> &words)
+		RuleMetadata(Rule &&rule, const Symbol &marker, InterningMonoid<Symbol> &words)
 			: match(std::move(rule.left)), markerIndex(match.size()) {
 			match.push_back(marker);
 			match.insert(match.end(), rule.right.begin(), rule.right.end());
 			match.push_back(marker);
-			rightHalfID = words.addWord(std::span{match.begin() + markerIndex, match.end()});
+			rightHalfID = words.create(std::span{match.begin() + markerIndex, match.end()});
 		}
 		auto size() const { return match.size() - 1; }
 
@@ -53,20 +58,20 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize> {
 												other.match.end() - 1);
 		}
 
-		WordID output(UniqueWordSet<Symbol> &words, size_t offset) const {
+		auto output(const OutputMonoid &m, size_t offset) const {
 			// assert(offset < match.size());
-			if (offset < markerIndex) return words.addWord(std::span{&match[offset], 1});
-			else return 0;	   // epsilon
+			if (offset < markerIndex) return m.create(std::span<const Symbol>{&match[offset], 1});
+			else return OutputMonoid::identity;
 		}
-		WordID color(UniqueWordSet<Symbol> &words) const {
-			return words.addWord(std::span{match.begin() + markerIndex + 1, match.end()});
+		auto color(const OutputMonoid &m) const {
+			return m.create(std::span<const Symbol>{match.begin() + markerIndex + 1, match.end()});
 		}
 
 		/// words must be the same as the one used to construct the RuleMetadata
-		WordID delay(UniqueWordSet<Symbol> &words, size_t offset) const {
-			if (offset < markerIndex) return 0;
-			int	   len	  = std::max(0, (int)(offset - markerIndex));
-			WordID result = words.addSubWord(rightHalfID, 0, len);
+		OutValue delay(InterningMonoid<Symbol> &words, size_t offset) const {
+			if (offset < markerIndex) return OutputMonoid::identity;
+			int		 len	= std::max(0, (int)(offset - markerIndex));
+			OutValue result = words.createInfix(rightHalfID, 0, len);
 			return result;
 		}
 	};
@@ -78,10 +83,10 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize> {
 	using TotalSSFT<Symbol, alphabetSize>::N;
 	using TotalSSFT<Symbol, alphabetSize>::transitions;
 	using TotalSSFT<Symbol, alphabetSize>::output;
-	using TotalSSFT<Symbol, alphabetSize>::words;
+	using TotalSSFT<Symbol, alphabetSize>::monoid;
 
 	struct TemporaryStateData {
-		WordID								 color;
+		OutValue							 color;
 		std::array<Transition, alphabetSize> transitions;
 		auto								&operator[](size_t index) { return transitions[index]; }
 		auto								 operator[](size_t index) const { return transitions[index]; }
@@ -90,29 +95,45 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize> {
 	};
 
 	struct StateDataView {
-		WordID										color;
+		OutValue									color;
 		const std::array<Transition, alphabetSize> *transitions;
 
 		constexpr StateDataView(const TemporaryStateData &s) noexcept : color(s.color), transitions(&s.transitions) {}
-		constexpr StateDataView(WordID c, const std::array<Transition, alphabetSize> &t) noexcept
+		constexpr StateDataView(OutValue c, const std::array<Transition, alphabetSize> &t) noexcept
 			: color(c), transitions(&t) {}
 	};
 
 	struct hash {
-		constexpr hash()	 = default;
+		const monoid_hash<InterningMonoid<Symbol>> monHash;
+		constexpr hash(const InterningMonoid<Symbol> *outMonoid) : monHash(outMonoid) {}
 		using is_transparent = void;
 		constexpr size_t operator()(const TemporaryStateData &s) const {
-			return fl::hash<WordID>()(s.color) ^ fl::hash<std::array<Transition, alphabetSize>>()(s.transitions);
+			size_t h = 0;
+			hash_combine(h, monHash(s.color));
+			// !!!hashes the bytes
+			hash_combine(h, fl::hash<std::array<Transition, alphabetSize>>()((s.transitions)));
+			return h;
 		}
 		constexpr size_t operator()(const StateDataView &s) const {
-			return fl::hash<WordID>()(s.color) ^ fl::hash<std::array<Transition, alphabetSize>>()(*s.transitions);
+			size_t h = 0;
+			hash_combine(h, monHash(s.color));
+			// !!!hashes the bytes
+			hash_combine(h, fl::hash<std::array<Transition, alphabetSize>>()(*s.transitions));
+			return h;
 		}
 	};
+
 	struct equal {
-		constexpr equal()	 = default;
 		using is_transparent = void;
+		constexpr equal() {}
 		constexpr bool operator()(const StateDataView &a, const StateDataView &b) const {
-			return a.color == b.color && *a.transitions == *b.transitions;
+			if (a.color != b.color) return false;
+			for (size_t i = 0; i < alphabetSize; ++i) {
+				const auto &ta = (*a.transitions)[i];
+				const auto &tb = (*b.transitions)[i];
+				if (ta.next != tb.next || ta.outputID != tb.outputID) return false;
+			}
+			return true;
 		}
 	};
 
@@ -121,13 +142,15 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize> {
 		std::vector<TemporaryStateData>							   unminimizedStates;	  /// treat as a stack
 		RuleMetadata											  *prevRuleMeta = nullptr;
 
-		UniqueWordSet<Symbol> words;	  /// store the output words for each state in minimizedStates
-		std::vector<WordID>	  delays;	  /// output for each state in minimizedStates
+		InterningMonoid<Symbol> words;		/// store the output words for each state in minimizedStates
+		std::vector<OutValue>	delays;		/// output for each state in minimizedStates
 
-		void newState(WordID color) {
+		explicit TemporaryData(const OutputMonoid &outMonoid) : minimizedStates(0, hash{&outMonoid}, equal{}) {}
+
+		void newState(OutValue color) {
 			unminimizedStates.push_back({color, {}});
 			for (auto &t : unminimizedStates.back())
-				t = {0, -1u};
+				t = {OutputMonoid::identity, -1u};
 		}
 		auto popState() {
 			assert(!unminimizedStates.empty());
@@ -141,8 +164,8 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize> {
 		if (transitions.size() <= N) {
 			transitions.push_back({});
 			for (auto &t : transitions.back())
-				t = {0, -1u};
-			output.push_back(0);	 // epsilon
+				t = {OutputMonoid::identity, -1u};
+			output.push_back(OutputMonoid::identity);	  // epsilon
 			assert(transitions.size() == output.size() && transitions.size() == N + 1);
 		}
 		return N++;
@@ -152,7 +175,8 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize> {
 		for (Symbol l = 0; l < Symbol::size; ++l) {
 			if (l == marker) continue;
 			// self-loop for all letters except marker
-			transitions[initial][size_t(l)] = {words.addWord(std::span{&l, 1}), initial};
+			transitions[initial][size_t(l)] = {monoid.template getMonoid<1>().create(std::span<const Symbol>{&l, 1}),
+											   initial};
 		}
 		std::vector<State> fail(N, -1u);
 		fail[initial]	= initial;
@@ -181,12 +205,12 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize> {
 					std::vector<Symbol> failOutput;
 					// assert output[fail[state]].size() is a suffix of output[state].size()
 
-					std::span<const Symbol> delayTo	   = tempData.words[tempData.delays[to]];
-					std::span<const Symbol> delayState = tempData.words[tempData.delays[state]];
+					std::span<const Symbol> delayTo	   = tempData.words.gen(tempData.delays[to]);
+					std::span<const Symbol> delayState = tempData.words.gen(tempData.delays[state]);
 					int						cutoff	   = delayTo.size();
 					failOutput.insert(failOutput.end(), delayState.begin(), delayState.end() - std::max(0, cutoff - 1));
 					if (cutoff <= 0) failOutput.push_back(l);
-					transitions[state][size_t(l)].outputID = words.addWord(failOutput);
+					transitions[state][size_t(l)].outputID = monoid.template getMonoid<1>().create(failOutput);
 				}
 			}
 		}
@@ -204,13 +228,13 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize> {
 		assert(tempData.unminimizedStates.size() <= ruleMeta.size() + 1);
 		if (tempData.unminimizedStates.size() == ruleMeta.size() + 1) {
 			// the last state is already created, just set its color
-			assert(tempData.unminimizedStates.back().color == 0);
+			assert(tempData.words.equal(tempData.unminimizedStates.back().color, OutputMonoid::identity));
 			tempData.unminimizedStates.back().color = ruleMeta.color(tempData.words);
 			return;
 		}
 
 		while (tempData.unminimizedStates.size() < ruleMeta.size()) {
-			tempData.newState(0);
+			tempData.newState(OutputMonoid::identity);
 		}
 		tempData.newState(ruleMeta.color(tempData.words));
 		assert(tempData.unminimizedStates.size() >= ruleMeta.size() + 1);
@@ -228,7 +252,7 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize> {
 			if (offset < prevRuleMeta.size()) {		// the deepest state has no spine successor
 				auto &[outputID, next] = newData.transitions[size_t(prevRuleMeta.match[offset])];
 				next				   = prevState;
-				outputID			   = tempData.prevRuleMeta->output(words, offset);
+				outputID			   = tempData.prevRuleMeta->output(monoid.template getMonoid<1>(), offset);
 			}
 
 			State state;
@@ -249,7 +273,7 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize> {
 		if (until >= 0) {
 			auto &[outputID, next] = tempData.unminimizedStates.back().transitions[size_t(prevRuleMeta.match[until])];
 			next				   = prevState;
-			outputID			   = tempData.prevRuleMeta->output(words, until);
+			outputID			   = tempData.prevRuleMeta->output(monoid.template getMonoid<1>(), until);
 		}
 
 		assert(tempData.unminimizedStates.size() == (size_t)until + 1);
@@ -260,10 +284,13 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize> {
 		: marker(marker), minimize(minimize) {
 		// build a trie of the left parts of the rules
 
-		TemporaryData tempData;
+		typename OutputMonoid::Value markerAsValue =
+			monoid.template getMonoid<1>().create(std::span<const Symbol>{&marker, 1});
+
+		TemporaryData tempData(monoid.template getMonoid<1>());
 
 		State initial = newState();
-		tempData.delays.push_back(0);
+		tempData.delays.push_back(OutputMonoid::identity);
 		assert(tempData.delays.size() == N);
 
 		std::vector<RuleMetadata> sortedRules;
@@ -305,14 +332,14 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize> {
 			for (size_t i = 0; i < ruleMeta.size(); ++i) {
 				auto &[outputID, next] = transitions[state][size_t(ruleMeta.match[i])];
 				assert(next != -1u);
-				if (i > 1 && ruleMeta.match[i - 1] == marker) { output[state] = words.addWord(std::span{&marker, 1}); }
+				if (i > 1 && ruleMeta.match[i - 1] == marker) { output[state] = markerAsValue; }
 				state = next;
 			}
-			output[state]					   = ruleMeta.color(words);
+			output[state]					   = ruleMeta.color(monoid.template getMonoid<1>());
 			transitions[state][size_t(marker)] = {output[state], trieStart};
 		}
 
-		transitions[initial][size_t(marker)] = {words.addWord(std::span{&marker, 1}), trieStart};
+		transitions[initial][size_t(marker)] = {markerAsValue, trieStart};
 		// draw(tempData);
 
 		fillFailTransitions(initial, trieStart, tempData);
@@ -335,10 +362,12 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize> {
 		out << "  node [shape=circle];\n";
 		out << "  init [label=\"N=" << N << "\", shape=square];\n";
 		out << "  init -> 0;\n";	 // initial state
+		auto &outMonoid = monoid.template getMonoid<1>();
 		for (State s = 0; s < N; ++s) {
-			out << "  " << s << " [shape=" << (output[s] != 0 ? "doublecircle" : "circle") << ", label=\"" << s << ": ";
-			if (output[s] != 0) {
-				for (const auto &letter : words[output[s]]) {
+			bool hasOutput = !outMonoid.equal(output[s], OutputMonoid::identity);
+			out << "  " << s << " [shape=" << (hasOutput ? "doublecircle" : "circle") << ", label=\"" << s << ": ";
+			if (hasOutput) {
+				for (const auto &letter : outMonoid.gen(output[s])) {
 					out << letter;
 				}
 			}
@@ -355,9 +384,8 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize> {
 				const auto &[outputID, next] = transitions[s][size_t(l)];
 				if (next != -1u) {
 					out << "  " << s << " -> " << next << " [label=\"<" << l << ", ";
-					for (const auto &letter : words[outputID]) {
-						out << letter;
-					}
+					if constexpr (OStreamable<OutValue>) out << outputID;
+					else out << "unprintable";
 					out << ">\"];\n";
 				}
 			}
@@ -369,9 +397,8 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize> {
 				const auto &[outputID, next] = tempData.unminimizedStates[s][size_t(l)];
 				if (next != -1u) {
 					out << "  " << N + s << " -> " << (next < N ? next : N + next - N) << " [label=\"<" << l << ", ";
-					for (const auto &letter : words[outputID]) {
-						out << letter;
-					}
+					if constexpr (OStreamable<OutValue>) out << outputID;
+					else out << "unprintable";
 					out << ">\"];\n";
 				}
 			}
@@ -379,10 +406,9 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize> {
 			if (s < tempData.unminimizedStates.size() - 1) {
 				out << "  " << N + s << " -> " << (N + s + 1) << " [label=\"<" << tempData.prevRuleMeta->match[s]
 					<< ", ";
-				WordID outputID = tempData.prevRuleMeta->output(words, s);
-				for (const auto &letter : words[outputID]) {
-					out << letter;
-				}
+				OutValue outputID = tempData.prevRuleMeta->output(tempData.words, s);
+				if constexpr (OStreamable<OutValue>) out << outputID;
+				else out << "unprintable";
 				out << ">\", style=dashed];\n";
 			}
 		}

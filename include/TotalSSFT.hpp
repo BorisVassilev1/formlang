@@ -11,8 +11,9 @@ namespace fl {
 template <symbol Symbol, std::size_t alphabetSize = Symbol::size, monoid M = InterningMonoid<Symbol>>
 class TotalSSFT {
    public:
-	constexpr static bool deterministic = true;
-	constexpr static bool sorted_arcs	= true;
+	constexpr static bool		 deterministic = true;
+	constexpr static bool		 sorted_arcs   = true;
+	constexpr static std::size_t alphabet_size = alphabetSize;
 
 	using State		   = unsigned int;
 	using InputMonoid  = SymbolMonoid<Symbol>;
@@ -39,7 +40,7 @@ class TotalSSFT {
 	Map transitions;
 	/// the Ψ-function, output[state] = outputID
 	std::vector<OutValue> output;
-	OutValue			  initialOut = 0;
+	OutValue			  initialOut = OutputMonoid::identity;
 
    public:
 	TotalSSFT() = default;
@@ -52,10 +53,10 @@ class TotalSSFT {
 
 	[[clang::always_inline]] inline constexpr std::size_t size() const { return N; }
 	[[clang::always_inline]] inline constexpr std::size_t cacheCount() const {
-		return monoid.template getMonoid<1>().size();	  // this is not guaranteed to work
+		return monoid.template getMonoid<1>().totalWordCount();		// this is not guaranteed to work
 	}
 	[[clang::always_inline]] inline constexpr std::size_t cacheSize() const {
-		return monoid.template getMonoid<1>().cacheSize();	   // this is not guaranteed to work
+		return monoid.template getMonoid<1>().poolByteCount();	   // this is not guaranteed to work
 	}
 
 	//[[clang::always_inline]] inline std::pair<std::span<const Symbol>, bool> step(State &state, Symbol letter) const {
@@ -93,6 +94,7 @@ class TotalSSFT {
 	[[clang::always_inline]] inline auto Transitions(State state, Symbol letter) const {
 		return transitions[state][size_t(letter)];
 	}
+	const Monoid &GetMonoid() const { return monoid; }
 
 	/// this can return some kind of weird range, but let's be reasonable
 	void f(range_of<Symbol> auto input, std::vector<OutValue> &outputWord) const {
@@ -158,7 +160,7 @@ class TotalSSFT {
 		out << "  init [label=\"N=" << N << "\", shape=square];\n";
 		out << "  init -> 0;\n";	 // initial state
 		for (State s = 0; s < N; ++s) {
-			if (output[s] != 0) {
+			if (!monoid.template getMonoid<1>().equal(output[s], OutputMonoid::identity)) {
 				out << "  " << s << " [shape=doublecircle, label=\"";
 				if constexpr (OStreamable<OutValue>) out << output[s];
 				else out << "unprintable";
@@ -206,25 +208,30 @@ bool isCanonical(const Transducer &t) {
 	using State	 = typename Transducer::State;
 	using Symbol = typename Transducer::Letter_t;
 
-	for (State s = 0; s < t.size(); ++s) {
-		std::span<const Symbol> gcp;
-		bool					haveCandidate = t.isFinal(s);
-		if (haveCandidate) gcp = t.psi(s);
+	const auto &monoid = t.GetMonoid();
 
-		for (Symbol l = 0; l < Symbol::size; ++l) {
+	std::vector<Symbol> gcp;
+	for (State s = 0; s < t.size(); ++s) {
+		gcp.clear();
+		bool haveCandidate = t.IsFinal(s);
+		if (haveCandidate) {
+			const auto &out = monoid.template getMonoid<1>().gen(t.Psi(s));
+			gcp.insert(gcp.end(), out.begin(), out.end());
+		}
+
+		for (const auto &[letter, to] : t.Transitions(s)) {
 			if (haveCandidate && gcp.empty()) break;
-			State next	   = s;
-			auto [out, ok] = t.step(next, l);
-			if (!ok) continue;
+			const auto &[a, b] = letter;
+			const auto &out	   = monoid.template getMonoid<1>().gen(b);
 			if (!haveCandidate) {
-				gcp			  = out;
+				gcp.insert(gcp.end(), out.begin(), out.end());
 				haveCandidate = true;
 				continue;
 			}
 			size_t k = 0;
 			while (k < gcp.size() && k < out.size() && size_t(gcp[k]) == size_t(out[k]))
 				++k;
-			gcp = gcp.subspan(0, k);
+			gcp.erase(gcp.begin(), gcp.begin() + k);
 		}
 
 		if (haveCandidate && !gcp.empty()) return false;
