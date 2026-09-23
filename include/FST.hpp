@@ -14,7 +14,7 @@
 #include "pipes.hpp"
 #include "regexParser.hpp"
 #include "CartesianMonoid.hpp"
-#include "KleeneMonoid.hpp"
+#include "InterningMonoid.hpp"
 
 namespace fl {
 
@@ -23,12 +23,17 @@ namespace fl {
 // A transition carries a single value of a cartesian monoid combining the two
 // tapes (input/output words over Symbol) instead of an ad hoc pair of indices
 // into a hand-rolled word pool: Monoid::Value plays the role that the old
-// {StringID, StringID} tuple used to play, and KleeneMonoid<Symbol> is the
+// {StringID, StringID} tuple used to play, and InterningMonoid<Symbol> is the
 // (interning) pool for each tape.
 template <free_monoid I, monoid M>
-class FST {
+class SparseFST {
    public:
+	constexpr static bool deterministic = false;
+	constexpr static bool sorted_arcs	= false;
+
 	using Symbol = I::Symbol;
+	using InputMonoid  = I;
+	using OutputMonoid = M;
 	using State	 = unsigned int;
 	using Monoid = std::conditional_t<std::is_same_v<M, I>, DiagonalMonoid<I>, CartesianMonoid<I, M>>;
 
@@ -41,17 +46,17 @@ class FST {
 	Monoid monoid;	   // owns the interning pools for both tapes
 	Map	   transitions;
 
-	constexpr FST()
+	constexpr SparseFST()
 		requires(std::is_default_constructible_v<Monoid>)
 		: N(0), monoid() {}
 
-	constexpr FST(const FST &)			  = default;
-	constexpr FST(FST &&)				  = default;
-	constexpr FST &operator=(const FST &) = default;
-	constexpr FST &operator=(FST &&)	  = default;
+	constexpr SparseFST(const SparseFST &)			  = default;
+	constexpr SparseFST(SparseFST &&)				  = default;
+	constexpr SparseFST &operator=(const SparseFST &) = default;
+	constexpr SparseFST &operator=(SparseFST &&)	  = default;
 
-	explicit constexpr FST(Monoid &&m) : N(0), monoid(std::move(m)) {}
-	explicit constexpr FST(const Monoid &m) : N(0), monoid(m) {}
+	explicit constexpr SparseFST(Monoid &&m) : N(0), monoid(std::move(m)) {}
+	explicit constexpr SparseFST(const Monoid &m) : N(0), monoid(m) {}
 
 	// void addTransition(State from, std::vector<Symbol> &&w1, std::vector<Symbol> &&w2, State to) {
 	//	auto v1 = monoid.template getMonoid<0>().create(std::span<const Symbol>(w1.data(), w1.size()));
@@ -109,10 +114,31 @@ class FST {
 		}
 		out << "}\n";
 	}
+
+	const auto	&Initial() const { return qFirsts; }
+	bool		 IsInitial(State q) const { return qFirsts.contains(q); }
+	const auto & Final() const { return qFinals; }
+	bool		 IsFinal(State q) const { return qFinals.contains(q); }
+	std::size_t	 Size() const { return N; }
+	auto Transitions(State q) const {
+		auto [begin, end] = transitions.equal_range(q);
+		return std::ranges::subrange(begin, end) | std::views::values;
+	}
 };
+}	  // namespace fl
+
+#include "letter.hpp"
+static_assert(fl::FSA<fl::SparseFST<fl::InterningMonoid<fl::Letter>, fl::IntegerMonoid<>>>,
+			  "SparseFST<IntegerMonoid<>> should satisfy the FSA concept");
+static_assert(fl::FST<fl::SparseFST<fl::InterningMonoid<fl::Letter>, fl::IntegerMonoid<>>>,
+			  "SparseFST<IntegerMonoid<>> should satisfy the FST concept");
+static_assert(fl::FST<fl::SparseFST<fl::InterningMonoid<fl::Letter>, fl::InterningMonoid<fl::Letter>>>,
+			  "SparseFST<InterningMonoid<>> should satisfy the FST concept");
+
+namespace fl {
 
 template <symbol Symbol>
-using StringFST = FST<KleeneMonoid<Symbol>, KleeneMonoid<Symbol>>;
+using StringFST = SparseFST<InterningMonoid<Symbol>, InterningMonoid<Symbol>>;
 
 // Berry-Sethi constructions
 

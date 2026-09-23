@@ -2,6 +2,8 @@
 
 #include <array>
 #include <cstddef>
+#include <istream>
+#include <ostream>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -16,8 +18,8 @@ namespace fl {
 // and `Slots...` says, per tape, *which* element of `Owned` that tape uses.
 // Tapes that repeat the same slot index share one physical monoid instance
 // instead of each owning an independent copy -- e.g. an FST whose two tapes
-// are both KleeneMonoid<Symbol> (interning string pools) can use `Slots =
-// {0, 0}` over `Owned = std::tuple<KleeneMonoid<Symbol>>` so both tapes
+// are both InterningMonoid<Symbol> (interning string pools) can use `Slots =
+// {0, 0}` over `Owned = std::tuple<InterningMonoid<Symbol>>` so both tapes
 // intern into the same pool, instead of duplicating it.
 //
 // The tape -> instance mapping is a compile-time constant, so getMonoid<I>()
@@ -39,13 +41,20 @@ class SharedCartesianMonoid<std::tuple<OwnedTs...>, Slots...> {
 
 	OwnedTuple owned;
 
-	static constexpr std::size_t				   NumTapes = sizeof...(Slots);
+	static constexpr std::size_t					   NumTapes = sizeof...(Slots);
 	static constexpr std::array<std::size_t, NumTapes> slots{Slots...};
 
    public:
 	using Value = std::tuple<typename ElemAt<Slots>::Value...>;
 
+	// Constrained (rather than an unconditional catch-all) so it doesn't
+	// out-compete a more specific constructor -- e.g. an exact-match single
+	// std::stringstream& argument would otherwise beat the istream&
+	// constructor below (which needs a derived-to-base conversion) in
+	// overload resolution, get selected, and then fail deep inside trying to
+	// construct a multi-element tuple from one stream.
 	template <class... Args>
+		requires std::constructible_from<OwnedTuple, Args...>
 	constexpr SharedCartesianMonoid(Args &&...args) : owned(std::forward<Args>(args)...) {}
 
 	static constexpr Value identity{ElemAt<Slots>::identity...};
@@ -78,6 +87,24 @@ class SharedCartesianMonoid<std::tuple<OwnedTs...>, Slots...> {
 		return Value(std::get<slots[Is]>(owned).own(std::get<slots[Is]>(src.owned), std::get<Is>(a))...);
 	}
 
+	// const, matching InterningMonoid::compact() const: the owned monoids
+	// mutate their own pools through their own `mutable` members, same as
+	// InterningMonoid does, so this doesn't need non-const access to `owned`
+	// -- and it must be const, since compactable_monoid checks callability
+	// through a `const M&`.
+	template <std::size_t I>
+	void compactTape(const auto &...liveRanges) const {
+		if constexpr (fl::compactable_monoid<ElemAt<slots[I]>>) {
+			std::get<slots[I]>(owned).compact(
+				std::views::transform(liveRanges, [](const Value &v) { return std::get<I>(v); })...);
+		}
+	}
+
+	template <std::size_t... Is>
+	void compactImpl(std::index_sequence<Is...>, const auto &...liveRanges) const {
+		(compactTape<Is>(liveRanges...), ...);
+	}
+
    public:
 	constexpr auto mul(auto a, auto b) const { return mulImpl(a, b, std::make_index_sequence<NumTapes>{}); }
 	constexpr auto invMul(auto a, auto b) const { return invMulImpl(a, b, std::make_index_sequence<NumTapes>{}); }
@@ -87,7 +114,7 @@ class SharedCartesianMonoid<std::tuple<OwnedTs...>, Slots...> {
 
 	/// copy a value from another (structurally identical) SharedCartesianMonoid's
 	/// tapes into this one's, tape by tape -- e.g. re-interning words produced by
-	/// a different KleeneMonoid pool into this one's pool.
+	/// a different InterningMonoid pool into this one's pool.
 	constexpr Value own(const SharedCartesianMonoid &src, auto a) const {
 		return ownImpl(src, a, std::make_index_sequence<NumTapes>{});
 	}
@@ -96,10 +123,39 @@ class SharedCartesianMonoid<std::tuple<OwnedTs...>, Slots...> {
 	constexpr const auto &getMonoid() const {
 		return std::get<slots[I]>(owned);
 	}
+
+	// tries to compact all owned monoids
+	template <std::ranges::input_range... Ranges>
+		requires((fl::range_of<Ranges, Value> && ...) && (fl::compactable_monoid<OwnedTs> || ...))
+	void compact(Ranges &&...liveRanges) const {
+		compactImpl(std::make_index_sequence<NumTapes>{}, liveRanges...);
+	}
+
+	// Serializes each physically-owned monoid instance exactly once (by
+	// `owned`, not by tape/slot -- two tapes sharing one instance via a
+	// repeated slot, e.g. DiagonalMonoid, must not have it written twice).
+	// Unlike compact(), this needs EVERY owned monoid to be serializable, not
+	// just some: a tape silently skipped here couldn't be reconstructed on
+	// read, so there's no "some tapes" escape hatch the way compact() has.
+	const SharedCartesianMonoid &serialize(std::ostream &out) const
+		requires(fl::serializable_monoid<OwnedTs> && ...)
+	{
+		std::apply([&](const auto &...m) { (m.serialize(out), ...); }, owned);
+		return *this;
+	}
+
+	// Reads back `owned` in the same order serialize() wrote it. The braced
+	// init-list (not a parenthesized call) is load-bearing: list-init
+	// sequences each element's construction left to right, guaranteeing the
+	// per-monoid reads happen in the same order they were written in, which
+	// ordinary function-argument evaluation order would NOT guarantee.
+	explicit SharedCartesianMonoid(std::istream &in)
+		requires(fl::serializable_monoid<OwnedTs> && ...)
+		: owned{OwnedTs(in)...} {}
 };
 
 // Today's default: one independent monoid instance per tape, no sharing --
-// e.g. CartesianMonoid<KleeneMonoid<char>, KleeneMonoid<char>> owns two
+// e.g. CartesianMonoid<InterningMonoid<char>, InterningMonoid<char>> owns two
 // separate string pools, one per tape.
 namespace detail {
 template <class TupleOfTypes, class Seq>
@@ -114,7 +170,7 @@ template <class... Ts>
 using CartesianMonoid = typename detail::IdentitySlots<std::tuple<Ts...>, std::index_sequence_for<Ts...>>::type;
 
 // Both tapes backed by the SAME monoid instance -- e.g.
-// DiagonalMonoid<KleeneMonoid<Symbol>> shares one string pool between the
+// DiagonalMonoid<InterningMonoid<Symbol>> shares one string pool between the
 // input and output tapes of an FST, instead of duplicating it.
 template <class M>
 using DiagonalMonoid = SharedCartesianMonoid<std::tuple<M>, 0, 0>;
@@ -122,8 +178,11 @@ using DiagonalMonoid = SharedCartesianMonoid<std::tuple<M>, 0, 0>;
 };	   // namespace fl
 
 #include "IntegerMonoid.hpp"
-#include "KleeneMonoid.hpp"
+#include "InterningMonoid.hpp"
 
 static_assert(fl::monoid<fl::CartesianMonoid<fl::IntegerMonoid<>, fl::IntegerMonoid<>, fl::IntegerMonoid<>>>);
-static_assert(fl::monoid<fl::CartesianMonoid<fl::KleeneMonoid<char> &, fl::KleeneMonoid<char>>>);
-static_assert(fl::monoid<fl::DiagonalMonoid<fl::KleeneMonoid<char>>>);
+static_assert(fl::monoid<fl::CartesianMonoid<fl::InterningMonoid<char> &, fl::InterningMonoid<char>>>);
+static_assert(fl::monoid<fl::DiagonalMonoid<fl::InterningMonoid<char>>>);
+
+/// cartesian product of free monoids is not itself a free monoid, because (a, Ɛ) and (Ɛ, a) commute
+static_assert(!fl::free_monoid<fl::CartesianMonoid<fl::IntegerMonoid<>, fl::IntegerMonoid<>, fl::IntegerMonoid<>>>);

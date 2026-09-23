@@ -74,4 +74,22 @@ struct hash<std::tuple<Args...>> {
 	}
 };
 
+template<monoid M>
+struct monoid_hash {
+	const M *monoid;
+	constexpr monoid_hash(const M *monoid) : monoid(monoid) {}
+	constexpr std::size_t operator()(const typename M::Value &v) const {
+		return monoid->hash(v);
+	}
+};
+
+template<monoid M>
+struct monoid_equal {
+	const M *monoid;
+	constexpr monoid_equal(const M *monoid) : monoid(monoid) {}
+	constexpr bool operator()(const typename M::Value &a, const typename M::Value &b) const {
+		return monoid->equal(a, b);
+	}
+};
+
 }	  // namespace fl

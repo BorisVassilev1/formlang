@@ -1,36 +1,45 @@
 #pragma once
 
+#include "CartesianMonoid.hpp"
+#include "SymbolMonoid.hpp"
 #include "concepts.hpp"
 #include "pipes.hpp"
 #include "utils.h"
-#include "wordset.hpp"
 
 namespace fl {
 
-template <symbol Symbol, std::size_t alphabetSize = Symbol::size>
+template <symbol Symbol, std::size_t alphabetSize = Symbol::size, monoid M = InterningMonoid<Symbol>>
 class TotalSSFT {
    public:
-	using State	 = unsigned int;
-	using WordID = UniqueWordSet<Symbol>::WordID;
+	constexpr static bool deterministic = true;
+	constexpr static bool sorted_arcs	= true;
+
+	using State		   = unsigned int;
+	using InputMonoid  = SymbolMonoid<Symbol>;
+	using OutputMonoid = M;
+	using Monoid	   = CartesianMonoid<SymbolMonoid<Symbol>, M>;
+
+	using OutValue = typename OutputMonoid::Value;
+
 	struct Transition {
-		WordID outputID;
-		State  next;
-		bool   operator==(const Transition &other) const  = default;
-		bool   operator!=(const Transition &other) const  = default;
-		bool   operator<=>(const Transition &other) const = default;
+		OutValue outputID;
+		State	 next;
+		bool	 operator==(const Transition &other) const	= default;
+		bool	 operator!=(const Transition &other) const	= default;
+		bool	 operator<=>(const Transition &other) const = default;
 	};
 	using Map	   = std::vector<std::array<Transition, alphabetSize>>;
 	using Letter_t = Symbol;
 
    protected:
-	unsigned int		  N = 0;
-	UniqueWordSet<Symbol> words;
+	unsigned int N = 0;
 
+	Monoid monoid;
 	/// transitions[from][letter] = (outputID, to)
 	Map transitions;
 	/// the Ψ-function, output[state] = outputID
-	std::vector<WordID> output;
-	WordID				initialOut = 0;
+	std::vector<OutValue> output;
+	OutValue			  initialOut = 0;
 
    public:
 	TotalSSFT() = default;
@@ -42,47 +51,83 @@ class TotalSSFT {
 	TotalSSFT &operator=(TotalSSFT &&)		= default;
 
 	[[clang::always_inline]] inline constexpr std::size_t size() const { return N; }
-	[[clang::always_inline]] inline constexpr std::size_t cacheCount() const { return words.size(); }
-	[[clang::always_inline]] inline constexpr std::size_t cacheSize() const { return words.totalLength(); }
-
-	[[clang::always_inline]] inline std::pair<std::span<const Symbol>, bool> step(State &state, Symbol letter) const {
-		auto &[outputID, next] = transitions[state][size_t(letter)];
-		if (next == -1u) return std::make_pair(std::span<const Symbol>{}, false);
-		state = next;
-		return std::make_pair(words[outputID], true);
+	[[clang::always_inline]] inline constexpr std::size_t cacheCount() const {
+		return monoid.template getMonoid<1>().size();	  // this is not guaranteed to work
+	}
+	[[clang::always_inline]] inline constexpr std::size_t cacheSize() const {
+		return monoid.template getMonoid<1>().cacheSize();	   // this is not guaranteed to work
 	}
 
-	[[clang::always_inline]] inline bool steps(State &state, std::span<const Symbol> input,
-											   std::vector<Symbol> &output) const {
-		for (Symbol letter : input) {
-			auto [out, ok] = step(state, letter);
-			if (!ok) return false;
-			output.insert(output.end(), out.begin(), out.end());
-		}
-		return true;
+	//[[clang::always_inline]] inline std::pair<std::span<const Symbol>, bool> step(State &state, Symbol letter) const {
+	//	auto &[outputID, next] = transitions[state][size_t(letter)];
+	//	if (next == -1u) return std::make_pair(std::span<const Symbol>{}, false);
+	//	state = next;
+	//	return std::make_pair(words[outputID], true);
+	//}
+
+	//[[clang::always_inline]] inline bool steps(State &state, std::span<const Symbol> input,
+	//										   std::vector<Symbol> &output) const {
+	//	for (Symbol letter : input) {
+	//		auto [out, ok] = step(state, letter);
+	//		if (!ok) return false;
+	//		output.insert(output.end(), out.begin(), out.end());
+	//	}
+	//	return true;
+	//}
+
+	[[clang::always_inline]] inline auto				 Psi(State state) const { return output[state]; }
+	[[clang::always_inline]] inline std::array<State, 1> Initial() const { return {0}; }
+	[[clang::always_inline]] inline bool				 IsInitial(State state) const { return state == 0; }
+
+	[[clang::always_inline]] inline auto InitialOutput() const { return initialOut; }
+
+	[[clang::always_inline]] inline bool		IsFinal(State) const { return true; }
+	[[clang::always_inline]] inline auto		Final() const { return std::ranges::iota_view(0u, N); }
+	[[clang::always_inline]] inline std::size_t Size() const { return N; }
+	[[clang::always_inline]] inline auto		Transitions(State state) const {
+		return std::views::enumerate(transitions[state]) | std::views::transform([](const auto &p) {
+				   const auto &[letter, transition] = p;
+				   return std::make_tuple(typename Monoid::Value(letter, transition.outputID), transition.next);
+			   });
+	}
+	[[clang::always_inline]] inline auto Transitions(State state, Symbol letter) const {
+		return transitions[state][size_t(letter)];
 	}
 
-	[[clang::always_inline]] inline std::span<const Symbol> psi(State state) const {
-		return std::span<const Symbol>(words[output[state]]);
-	}
-	[[clang::always_inline]] inline State initial() const { return 0; }
-
-	[[clang::always_inline]] inline std::span<const Symbol> initialOutput() const { return words[initialOut]; }
-	[[clang::always_inline]] inline bool					isFinal(State) const { return true; }
-
-	void f(std::span<const Symbol> input, std::vector<Symbol> &outputWord) const {
+	/// this can return some kind of weird range, but let's be reasonable
+	void f(range_of<Symbol> auto input, std::vector<OutValue> &outputWord) const {
 		State state = 0;
 		outputWord.clear();
-		outputWord.insert(outputWord.end(), words[initialOut].begin(), words[initialOut].end());
+		outputWord.push_back(initialOut);
 		for (const auto &letter : input) {
 			const auto &[outputID, next] = transitions[state][size_t(letter)];
 			state						 = next;
-			for (const auto &outLetter : words[outputID])
-				outputWord.push_back(outLetter);
+			outputWord.push_back(outputID);
 		}
-		for (const auto &outLetter : words[output[state]])
-			outputWord.push_back(outLetter);
+		outputWord.push_back(output[state]);
 	}
+
+	/// The same as the other overload, but in some sense
+	///	f(input) | monoid.getMonoid<1>().gen()
+	void f(range_of<Symbol> auto input, std::vector<Symbol> &outputWord) const
+		requires(!std::same_as<Symbol, OutValue>)	  // would clash
+	{
+		State state = 0;
+		outputWord.clear();
+		//
+		const auto &initial_out = monoid.template getMonoid<1>().gen(initialOut);
+		outputWord.insert(outputWord.end(), initial_out.begin(), initial_out.end());
+
+		for (const auto &letter : input) {
+			const auto &[outputID, next] = transitions[state][size_t(letter)];
+			state						 = next;
+			const auto &out				 = monoid.template getMonoid<1>().gen(outputID);
+			outputWord.insert(outputWord.end(), out.begin(), out.end());
+		}
+		const auto &final_out = monoid.template getMonoid<1>().gen(output[state]);
+		outputWord.insert(outputWord.end(), final_out.begin(), final_out.end());
+	}
+
 	std::vector<Symbol> f(std::span<const Symbol> input) const {
 		std::vector<Symbol> outputWord;
 		f(input, outputWord);
@@ -91,7 +136,7 @@ class TotalSSFT {
 
 	const TotalSSFT &serialize(std::ostream &out) const {
 		out.write(reinterpret_cast<const char *>(&N), sizeof(N));
-		words.serialize(out);
+		monoid.serialize(out);
 		out.write(reinterpret_cast<const char *>(transitions.data()), transitions.size() * sizeof(transitions[0]));
 		out.write(reinterpret_cast<const char *>(output.data()), output.size() * sizeof(output[0]));
 		return *this;
@@ -99,7 +144,7 @@ class TotalSSFT {
 
 	TotalSSFT(std::istream &in) {
 		in.read(reinterpret_cast<char *>(&N), sizeof(N));
-		words = UniqueWordSet<Symbol>(in);
+		monoid = Monoid(in);
 		transitions.resize(N);
 		output.resize(N);
 		in.read(reinterpret_cast<char *>(transitions.data()), transitions.size() * sizeof(transitions[0]));
@@ -115,9 +160,9 @@ class TotalSSFT {
 		for (State s = 0; s < N; ++s) {
 			if (output[s] != 0) {
 				out << "  " << s << " [shape=doublecircle, label=\"";
-				for (const auto &letter : words[output[s]]) {
-					out << letter;
-				}
+				if constexpr (OStreamable<OutValue>) out << output[s];
+				else out << "unprintable";
+
 				out << "\"];\n";								 // final States with output
 			} else out << "  " << s << " [shape=circle];\n";	 // final States
 
@@ -125,9 +170,8 @@ class TotalSSFT {
 				const auto &[outputID, next] = transitions[s][size_t(l)];
 				if (next != -1u) {
 					out << "  " << s << " -> " << next << " [label=\"<" << l << ", ";
-					for (const auto &letter : words[outputID]) {
-						out << letter;
-					}
+					if constexpr (OStreamable<OutValue>) out << outputID;
+					else out << "unprintable";
 					out << ">\"];\n";
 				}
 			}
@@ -159,7 +203,7 @@ void statFSA(const TotalSSFT<Symbol, alphabetSize> &fsa) {
 /// tests if the subsequential transducer is canonical
 template <SSFST Transducer>
 bool isCanonical(const Transducer &t) {
-	using State = typename Transducer::State;
+	using State	 = typename Transducer::State;
 	using Symbol = typename Transducer::Letter_t;
 
 	for (State s = 0; s < t.size(); ++s) {
@@ -169,7 +213,7 @@ bool isCanonical(const Transducer &t) {
 
 		for (Symbol l = 0; l < Symbol::size; ++l) {
 			if (haveCandidate && gcp.empty()) break;
-			State next			= s;
+			State next	   = s;
 			auto [out, ok] = t.step(next, l);
 			if (!ok) continue;
 			if (!haveCandidate) {
@@ -178,7 +222,8 @@ bool isCanonical(const Transducer &t) {
 				continue;
 			}
 			size_t k = 0;
-			while (k < gcp.size() && k < out.size() && size_t(gcp[k]) == size_t(out[k])) ++k;
+			while (k < gcp.size() && k < out.size() && size_t(gcp[k]) == size_t(out[k]))
+				++k;
 			gcp = gcp.subspan(0, k);
 		}
 
@@ -190,5 +235,4 @@ bool isCanonical(const Transducer &t) {
 }	  // namespace fl
 
 #include "letter.hpp"
-static_assert(fl::SSFSTI<fl::TotalSSFT<fl::Letter>>,
-			  "TotalSSFT does not satisfy the subsequential transducer concept");
+static_assert(fl::SSFSTI<fl::TotalSSFT<fl::Letter>>, "TotalSSFT does not satisfy the subsequential transducer concept");

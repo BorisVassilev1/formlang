@@ -28,7 +28,7 @@ class OutputFSA {
 		*this		  = OutputFSA<Symbol>(pseudoDeterminizeFST(std::move(realtime)), fixedOutput);
 	}
 
-	OutputFSA(ExpandedFST<KleeneMonoid<Symbol>> &&tfsa, Symbol fixedOutput) {
+	OutputFSA(ExpandedFST<InterningMonoid<Symbol>> &&tfsa, Symbol fixedOutput) {
 		this->N		  = tfsa.N;
 		this->qFinals = std::move(tfsa.qFinals);
 		this->qFirsts = std::move(tfsa.qFirsts);

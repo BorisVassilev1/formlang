@@ -34,7 +34,7 @@ class SparseSSFST {
 
 	// accepts a trimmed ExpandedFST and builds a subsequential finite-state transducer
 	// tests for bounded variation
-	SparseSSFST(ExpandedFST<KleeneMonoid<Symbol>> &&fsa, bool resolveNonFunctionality = false) {
+	SparseSSFST(ExpandedFST<InterningMonoid<Symbol>> &&fsa, bool resolveNonFunctionality = false) {
 		unsigned int C = 0;
 		for (auto w : fsa.words) {
 			if (w.size() > C) C = w.size();

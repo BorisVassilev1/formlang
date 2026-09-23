@@ -9,16 +9,26 @@
 namespace fl {
 
 template <class T>
-class RangeFromPair {
+class RangeFromPair : public std::ranges::view_interface<RangeFromPair<T>> {
 	T range;
 
    public:
+	using iterator = decltype(std::declval<T>().first);
+	using sentinel = decltype(std::declval<T>().second);
+	using value_type = std::remove_reference_t<decltype(*std::declval<iterator>())>;
+	using difference_type = std::ptrdiff_t;
+	using reference = value_type &;
+	using const_reference = const value_type &;
+
 	template <class U>
 	RangeFromPair(U &&range) : range(std::forward<U>(range)) {}
 
 	auto begin() { return range.first; }
 	auto end() { return range.second; }
 };
+
+static_assert(std::ranges::view<RangeFromPair<decltype(std::declval<std::unordered_map<int, int>>().equal_range(0))>>,
+			  "RangeFromPair should be a view");
 
 template <class T>
 RangeFromPair(T &&range) -> RangeFromPair<T>;

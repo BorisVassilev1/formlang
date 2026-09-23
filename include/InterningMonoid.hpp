@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cassert>
 #include <concepts.hpp>
 #include <iostream>
@@ -13,7 +14,7 @@ namespace fl {
 ///
 /// Essentially a string pool
 template <class S>
-class KleeneMonoid {
+class InterningMonoid {
    public:
 	class WordId {
 		uint32_t id;
@@ -27,7 +28,7 @@ class KleeneMonoid {
 		constexpr WordId &operator=(const WordId &) = default;
 		constexpr WordId &operator=(WordId &&)		= default;
 
-		friend class KleeneMonoid<S>;
+		friend class InterningMonoid<S>;
 	};
 
    private:
@@ -38,10 +39,10 @@ class KleeneMonoid {
 
 	/// is in the temporaries vector
 	struct TemporaryId {
-		const KleeneMonoid<S> *owner;
-		uint32_t			   start;
-		uint32_t			   length;
-		TemporaryId(const KleeneMonoid<S> *owner, uint32_t start, uint32_t length);
+		const InterningMonoid<S> *owner;
+		uint32_t				  start;
+		uint32_t				  length;
+		TemporaryId(const InterningMonoid<S> *owner, uint32_t start, uint32_t length);
 		TemporaryId(const TemporaryId &other) noexcept;
 		TemporaryId(TemporaryId &&other) noexcept;
 		TemporaryId &operator=(const TemporaryId &other) noexcept;
@@ -54,9 +55,9 @@ class KleeneMonoid {
 
 	/// is an infix of a word in the pool itself
 	struct InfixId {
-		const KleeneMonoid<S> *owner;
-		uint32_t			   start;
-		uint32_t			   length;
+		const InterningMonoid<S> *owner;
+		uint32_t				  start;
+		uint32_t				  length;
 
 		operator WordId() const;
 	};
@@ -191,7 +192,8 @@ class KleeneMonoid {
 	using Value	 = WordId;
 	using Symbol = S;
 
-	KleeneMonoid() : storage(std::make_unique<Storage>()), wordMap(0, myHash(storage.get()), myEqual(storage.get())) {
+	InterningMonoid()
+		: storage(std::make_unique<Storage>()), wordMap(0, myHash(storage.get()), myEqual(storage.get())) {
 		addUnique(std::span<Symbol>{});
 	}
 
@@ -266,10 +268,9 @@ class KleeneMonoid {
 	std::span<const S> gen(const TemporaryId &a) const { return get(a); }
 	std::span<const S> gen(const InfixId &a) const { return get(a); }
 
-	Value own(const KleeneMonoid &m, Value a) const { return addUnique(m.get(a));}
+	Value own(const InterningMonoid &m, Value a) const { return addUnique(m.get(a)); }
 
-
-	// ---------------- methods down from here are not required by the concepts 
+	// ---------------- methods down from here are not required by the concepts
 
 	template <std::ranges::viewable_range V>
 	Value create(V &&v) const {
@@ -284,26 +285,128 @@ class KleeneMonoid {
 
 	uint32_t temporaryCount() const { return storage->temporaryCount; }
 	uint32_t totalWordCount() const { return nextWordId; }
+	std::size_t poolByteCount() const { return storage->words.size() * sizeof(S); }
+
+	/// Reclaims the storage of elements that are not in the given ranges
+	template <std::ranges::input_range... Ranges>
+		requires(fl::range_of<Ranges, Value> && ...)
+	void compact(Ranges &&...liveRanges) const {
+		std::vector<bool> live(nextWordId, false);
+		live[identity.id] = true;	  // the empty word is always kept
+		auto markLive	  = [&](const auto &range) {
+			for (const Value &v : range)
+				live[v.id] = true;
+		};
+		(markLive(liveRanges), ...);
+
+		std::erase_if(wordMap, [&](WordId id) { return !live[id.id]; });
+
+		// Sort live ids by their ORIGINAL offset so that words whose byte
+		// ranges overlap or nest -- e.g. an InfixId created by invMul, which
+		// reuses a suffix of another word's bytes rather than owning
+		// independent storage -- become adjacent and can be coalesced into a
+		// single physical copy, instead of each being duplicated
+		// independently (which would silently undo that sharing).
+		std::vector<uint32_t> liveIds;
+		liveIds.reserve(nextWordId);
+		for (uint32_t id = 0; id < nextWordId; ++id)
+			if (live[id]) liveIds.push_back(id);
+		std::ranges::sort(liveIds, {}, [&](uint32_t id) { return storage->wordsData[id].start; });
+
+		std::vector<S> newWords;
+		newWords.reserve(storage->words.size());
+		uint32_t runOldStart = 0, runOldEnd = 0, runNewStart = 0;
+		bool	 haveRun = false;
+		for (uint32_t id : liveIds) {
+			auto &[start, length] = storage->wordsData[id];
+			uint32_t end		   = start + length;
+			if (!haveRun || start > runOldEnd) {
+				// starts a fresh, disjoint run
+				runOldStart = start;
+				runNewStart = newWords.size();
+				newWords.insert(newWords.end(), storage->words.begin() + start, storage->words.begin() + end);
+				runOldEnd = end;
+				haveRun	  = true;
+			} else if (end > runOldEnd) {
+				// overlaps the current run but extends past it -- copy only the uncovered tail
+				newWords.insert(newWords.end(), storage->words.begin() + runOldEnd, storage->words.begin() + end);
+				runOldEnd = end;
+			}
+			// else: fully contained in the current run already -- nothing to copy
+			start = runNewStart + (start - runOldStart);
+		}
+		storage->words = std::move(newWords);
+
+		// Dead ids keep their slot (WordIds are never renumbered), but their
+		// old (start,length) now dangles past the shrunk buffer. Point them
+		// at the always-valid empty word instead of leaving stale,
+		// potentially out-of-bounds offsets sitting around -- this is what
+		// makes it safe to later walk every id 0..nextWordId (e.g. to rebuild
+		// wordMap when deserializing): a dead id just resolves to "" and
+		// content-dedups away against the real identity entry.
+		for (uint32_t id = 0; id < nextWordId; ++id) {
+			if (!live[id]) storage->wordsData[id] = {0, 0};
+		}
+	}
+
+	// ---------------- serialization: raw POD dump, no magic/version, same
+	// convention as UniqueWordSet::serialize (see wordset.hpp) -- write
+	// nextWordId, then wordsData verbatim (one entry per id, so its size is
+	// implied by nextWordId), then the words buffer (its length is implied by
+	// the max end offset across wordsData, so it isn't written separately
+	// either).
+
+	const InterningMonoid &serialize(std::ostream &out) const {
+		assert(storage->temporaryCount == 0 &&
+			   "cannot serialize an InterningMonoid while a mul()/invMul() result (TemporaryId/InfixId) is still "
+			   "outstanding -- convert it to a Value first");
+		out.write(reinterpret_cast<const char *>(&nextWordId), sizeof(nextWordId));
+		out.write(reinterpret_cast<const char *>(storage->wordsData.data()), storage->wordsData.size() * sizeof(WordData));
+		out.write(reinterpret_cast<const char *>(storage->words.data()), storage->words.size() * sizeof(S));
+		return *this;
+	}
+
+	explicit InterningMonoid(std::istream &in)
+		: storage(std::make_unique<Storage>()), wordMap(0, myHash(storage.get()), myEqual(storage.get())) {
+		in.read(reinterpret_cast<char *>(&nextWordId), sizeof(nextWordId));
+		storage->wordsData.resize(nextWordId);
+		in.read(reinterpret_cast<char *>(storage->wordsData.data()), storage->wordsData.size() * sizeof(WordData));
+
+		uint32_t totalLength = 0;
+		for (const auto &[start, length] : storage->wordsData)
+			totalLength = std::max(totalLength, start + length);
+		storage->words.resize(totalLength);
+		in.read(reinterpret_cast<char *>(storage->words.data()), totalLength * sizeof(S));
+
+		// rebuild the content -> id lookup table. Any dead id left pointing
+		// at the empty word by a prior compact() collapses harmlessly onto
+		// the real identity entry via content-based dedup (whichever id
+		// resolves to "" is inserted first -- id 0 always does, since the
+		// loop runs in ascending order), so it's safe to just walk every id.
+		wordMap.reserve(nextWordId);
+		for (uint32_t id = 0; id < nextWordId; ++id)
+			wordMap.emplace(WordId(id));
+	}
 };
 
 template <class S>
-KleeneMonoid<S>::TemporaryId::TemporaryId(const KleeneMonoid<S> *owner, uint32_t start, uint32_t length)
+InterningMonoid<S>::TemporaryId::TemporaryId(const InterningMonoid<S> *owner, uint32_t start, uint32_t length)
 	: owner(owner), start(start), length(length) {
 	owner->storage->createTemporary();
 }
 template <class S>
-KleeneMonoid<S>::TemporaryId::TemporaryId(const TemporaryId &other) noexcept
+InterningMonoid<S>::TemporaryId::TemporaryId(const TemporaryId &other) noexcept
 	: owner(other.owner), start(other.start), length(other.length) {
 	owner->storage->createTemporary();
 }
 template <class S>
-KleeneMonoid<S>::TemporaryId::TemporaryId(TemporaryId &&other) noexcept
+InterningMonoid<S>::TemporaryId::TemporaryId(TemporaryId &&other) noexcept
 	: owner(other.owner), start(other.start), length(other.length) {
 	owner->storage->createTemporary();
 }
 
 template <class S>
-KleeneMonoid<S>::TemporaryId &KleeneMonoid<S>::TemporaryId::operator=(const TemporaryId &other) noexcept {
+InterningMonoid<S>::TemporaryId &InterningMonoid<S>::TemporaryId::operator=(const TemporaryId &other) noexcept {
 	assert(owner == other.owner);
 	owner  = other.owner;
 	start  = other.start;
@@ -312,7 +415,7 @@ KleeneMonoid<S>::TemporaryId &KleeneMonoid<S>::TemporaryId::operator=(const Temp
 }
 
 template <class S>
-KleeneMonoid<S>::TemporaryId &KleeneMonoid<S>::TemporaryId::operator=(TemporaryId &&other) noexcept {
+InterningMonoid<S>::TemporaryId &InterningMonoid<S>::TemporaryId::operator=(TemporaryId &&other) noexcept {
 	assert(owner == other.owner);
 	owner  = other.owner;
 	start  = other.start;
@@ -321,93 +424,93 @@ KleeneMonoid<S>::TemporaryId &KleeneMonoid<S>::TemporaryId::operator=(TemporaryI
 }
 
 template <class S>
-KleeneMonoid<S>::TemporaryId::~TemporaryId() {
+InterningMonoid<S>::TemporaryId::~TemporaryId() {
 	owner->storage->deleteTemporary();
 }
 
 template <class S>
-KleeneMonoid<S>::TemporaryId::operator WordId() const {
+InterningMonoid<S>::TemporaryId::operator WordId() const {
 	return owner->addUnique(std::span<const S>(owner->storage->temporaries.data() + start, length));
 }
 
 template <class S>
-KleeneMonoid<S>::InfixId::operator WordId() const {
+InterningMonoid<S>::InfixId::operator WordId() const {
 	return owner->addUniqueInfix(start, length);
 }
 
 template <class S>
-std::span<const S> KleeneMonoid<S>::Storage::get(WordId id) const noexcept {
+std::span<const S> InterningMonoid<S>::Storage::get(WordId id) const noexcept {
 	const auto &[start, length] = wordsData[id.id];
 	return {words.data() + start, length};
 }
 
 template <class S>
-std::span<const S> KleeneMonoid<S>::Storage::get(const TemporaryId &id) const noexcept {
+std::span<const S> InterningMonoid<S>::Storage::get(const TemporaryId &id) const noexcept {
 	return {temporaries.data() + id.start, id.length};
 }
 
 template <class S>
-std::span<const S> KleeneMonoid<S>::Storage::get(const InfixId &id) const noexcept {
+std::span<const S> InterningMonoid<S>::Storage::get(const InfixId &id) const noexcept {
 	return {words.data() + id.start, id.length};
 }
 
 template <class S>
-auto KleeneMonoid<S>::Storage::insert(std::span<const S> word) {
+auto InterningMonoid<S>::Storage::insert(std::span<const S> word) {
 	wordsData.emplace_back(words.size(), word.size());
 	words.insert(words.end(), word.begin(), word.end());
 }
 template <class S>
-void KleeneMonoid<S>::Storage::createTemporary() {
+void InterningMonoid<S>::Storage::createTemporary() {
 	++temporaryCount;
 }
 template <class S>
-void KleeneMonoid<S>::Storage::deleteTemporary() {
+void InterningMonoid<S>::Storage::deleteTemporary() {
 	assert(temporaryCount > 0);
 	--temporaryCount;
 	if (temporaryCount == 0) { temporaries.clear(); }
 }
 
 template <class S>
-constexpr size_t KleeneMonoid<S>::myHash::operator()(WordId id) const {
+constexpr size_t InterningMonoid<S>::myHash::operator()(WordId id) const {
 	return (*this)(owner->get(id));
 }
 template <class S>
-constexpr size_t KleeneMonoid<S>::myHash::operator()(const std::span<S> &span) const {
+constexpr size_t InterningMonoid<S>::myHash::operator()(const std::span<S> &span) const {
 	return std::hash<std::string_view>()(
 		std::string_view(reinterpret_cast<const char *>(span.data()), span.size() * sizeof(S)));
 }
 template <class S>
-constexpr size_t KleeneMonoid<S>::myHash::operator()(const std::span<const S> &span) const {
+constexpr size_t InterningMonoid<S>::myHash::operator()(const std::span<const S> &span) const {
 	return std::hash<std::string_view>()(
 		std::string_view(reinterpret_cast<const char *>(span.data()), span.size() * sizeof(S)));
 }
 
 template <class S>
-bool KleeneMonoid<S>::myEqual::operator()(WordId a, WordId b) const {
+bool InterningMonoid<S>::myEqual::operator()(WordId a, WordId b) const {
 	auto &&A = owner->get(a);
 	auto &&B = owner->get(b);
 	return std::equal(A.begin(), A.end(), B.begin(), B.end());
 }
 template <class S>
 template <class V>
-bool KleeneMonoid<S>::myEqual::operator()(WordId id, const V &b) const {
+bool InterningMonoid<S>::myEqual::operator()(WordId id, const V &b) const {
 	auto &&A = owner->get(id);
 	return std::equal(A.begin(), A.end(), b.begin(), b.end());
 }
 template <class S>
 template <class U>
-bool KleeneMonoid<S>::myEqual::operator()(const U &a, WordId id) const {
+bool InterningMonoid<S>::myEqual::operator()(const U &a, WordId id) const {
 	auto &&B = owner->get(id);
 	return std::equal(a.begin(), a.end(), B.begin(), B.end());
 }
 
 template <class S>
 template <class U, class V>
-bool KleeneMonoid<S>::myEqual::operator()(const U &a, const V &b) const {
+bool InterningMonoid<S>::myEqual::operator()(const U &a, const V &b) const {
 	return std::distance(a.begin(), a.end()) == std::distance(b.begin(), b.end()) &&
 		   std::equal(a.begin(), a.end(), b.begin(), b.end());
 }
 };	   // namespace fl
 
-static_assert(fl::monoid<fl::KleeneMonoid<char>>);
-static_assert(fl::free_monoid<fl::KleeneMonoid<char>>);
+static_assert(fl::monoid<fl::InterningMonoid<char>>);
+static_assert(fl::free_monoid<fl::InterningMonoid<char>>);
