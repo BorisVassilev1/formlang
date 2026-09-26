@@ -64,17 +64,17 @@ int main() {
 	auto SSFTTokenizer = Tokenizer.determinizeToSSFT();
 	drawFSA(SSFTTokenizer);
 
-	auto traverser = SSFSTTraverser(SSFTTokenizer);
+	// auto traverser = SSFSTTraverser(SSFTTokenizer);
 
-	auto result = traverser.traverseOutputOnlyUntilCan(toSymbol<Token>("if"));
-	std::ranges::for_each(result, [](auto x) { std::cout << x << " "; });
-	std::cout << std::endl;
-	result = traverser.traverseOutputOnlyUntilCan(toSymbol<Token>("for"));
-	std::ranges::for_each(result, [](auto x) { std::cout << x << " "; });
-	std::cout << std::endl;
-	result = traverser.traverseOutputOnlyUntilCan(toSymbol<Token>("abc"));
-	std::ranges::for_each(result, [](auto x) { std::cout << x << " "; });
-	std::cout << std::endl;
+	// auto result = traverser.traverseOutputOnlyUntilCan(toSymbol<Token>("if"));
+	// std::ranges::for_each(result, [](auto x) { std::cout << x << " "; });
+	// std::cout << std::endl;
+	// result = traverser.traverseOutputOnlyUntilCan(toSymbol<Token>("for"));
+	// std::ranges::for_each(result, [](auto x) { std::cout << x << " "; });
+	// std::cout << std::endl;
+	// result = traverser.traverseOutputOnlyUntilCan(toSymbol<Token>("abc"));
+	// std::ranges::for_each(result, [](auto x) { std::cout << x << " "; });
+	// std::cout << std::endl;
 
 	std::cin >> std::noskipws;
 	auto input = std::views::istream<char>(std::cin) | std::views::cache_latest;

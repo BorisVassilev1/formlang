@@ -106,20 +106,21 @@ namespace fl {
 template <SSFST T1, SSFST T2>
 	requires(free_monoid<typename T1::OutputMonoid> &&
 			 std::same_as<typename T1::OutputMonoid::Symbol, typename T2::InputMonoid::Symbol>)
-class ComposeSSFST : public TotalSSFT<typename T1::Letter_t, T1::alphabet_size, typename T2::OutputMonoid> {
-   public:
+class ComposeSSFST : public TotalSSFST<typename T1::Letter_t, T1::alphabet_size, get_output_t<T2>> {
 	using Symbol	   = typename T1::Letter_t;
-	using Base		   = TotalSSFT<Symbol, T1::alphabet_size, typename T2::OutputMonoid>;
-	using State		   = typename Base::State;
+	using Base		   = TotalSSFST<Symbol, T1::alphabet_size, get_output_t<T2>>;
 	using OutputMonoid = typename Base::OutputMonoid;
 	using OutValue	   = typename Base::OutValue;
+
+   public:
+	using State = typename Base::State;
 
 	ComposeSSFST(const T1 &first, const T2 &second) {
 		using State1   = typename T1::State;
 		using State2   = typename T2::State;
 		using BigState = std::tuple<State1, State2>;
 
-		auto &outMonoid = this->GetMonoid().template getMonoid<1>();
+		auto &outMonoid = get<1>(this->GetMonoid());
 
 		fl::unordered_map<BigState, State> stateRemap;
 		std::vector<bool>				   visited;
@@ -135,24 +136,25 @@ class ComposeSSFST : public TotalSSFT<typename T1::Letter_t, T1::alphabet_size, 
 			return newID;
 		};
 
-		// Feeds `midWord` (a value of T1::OutputMonoid == T2::InputMonoid,
-		// decoded via first's own pool -- gen() only ever needs to read from
-		// the pool that actually owns the value) through second starting at
-		// s2, accumulating second's own output into this transducer's own
-		// pool (own() re-interns each piece out of second's pool before
-		// mul()-ing it in -- the two pools are separate instances, so
-		// second's raw values are meaningless inside outMonoid otherwise).
 		// Returns the accumulated OutValue and the T2 state reached.
 		auto driveSecond = [&](State2								   s2,
 							   const typename T1::OutputMonoid::Value &midWord) -> std::pair<OutValue, State2> {
-			OutValue acc = OutputMonoid::identity;
-			for (const auto &sym : first.GetMonoid().template getMonoid<1>().gen(midWord)) {
-				auto [val2, next2] = second.Transitions(s2)[sym];
-				OutValue piece	   = outMonoid.own(second.GetMonoid().template getMonoid<1>(), std::get<1>(val2));
+			auto word = get<1>(first.GetMonoid()).gen(midWord);
+			if (word.empty()) return {OutputMonoid::identity, s2};
+
+			auto symIt		   = word.begin();
+			auto [val2, next2] = second.Transitions(s2)[*symIt];
+			// this may not be T2::OutputMonoid::Value, but is convertible to it
+			auto acc = outMonoid.own(get<1>(second.GetMonoid()), std::get<1>(val2));
+			s2		 = next2;
+
+			for (++symIt; symIt != word.end(); ++symIt) {
+				auto [valN, nextN] = second.Transitions(s2)[*symIt];
+				auto piece		   = outMonoid.own(get<1>(second.GetMonoid()), std::get<1>(valN));
 				acc				   = outMonoid.mul(acc, piece);
-				s2				   = next2;
+				s2				   = nextN;
 			}
-			return {acc, s2};
+			return {OutValue(acc), s2};
 		};
 
 		State1 s1init = *first.Initial().begin();
@@ -160,8 +162,9 @@ class ComposeSSFST : public TotalSSFT<typename T1::Letter_t, T1::alphabet_size, 
 
 		State2 s2afterInit = s2init;
 		if constexpr (SSFSTI<T1>) {
-			auto [initOut, s2afterInit] = driveSecond(s2init, first.InitialOutput());
-			this->initialOut			= initOut;
+			auto [initOut, s2New] = driveSecond(s2init, first.InitialOutput());
+			this->initialOut	  = initOut;
+			s2afterInit			  = s2New;
 		} else {
 			this->initialOut = OutputMonoid::identity;
 		}
@@ -182,7 +185,7 @@ class ComposeSSFST : public TotalSSFT<typename T1::Letter_t, T1::alphabet_size, 
 			// Psi: T1's final output at s1, threaded through T2 from s2,
 			// then second's own final output at the T2 state that lands on.
 			auto [midOut, s2final]	= driveSecond(s2, first.Psi(s1));
-			OutValue secondFinal	= outMonoid.own(second.GetMonoid().template getMonoid<1>(), second.Psi(s2final));
+			OutValue secondFinal	= outMonoid.own(get<1>(second.GetMonoid()), second.Psi(s2final));
 			this->output[currentID] = outMonoid.mul(midOut, secondFinal);
 
 			for (Symbol l = 0; l < T1::alphabet_size; ++l) {

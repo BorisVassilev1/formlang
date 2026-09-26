@@ -69,19 +69,24 @@ class ExpandedFST {
 	void addTransition(State from, InSymbol a, OutValue b, State to) { transitions.insert({from, {Value(a, b), to}}); }
 	void addTransition(State from, const Value &label, State to) { transitions.insert({from, {label, to}}); }
 
+	template <class T>
+		requires free_monoid<M>
+	void addTransition(State from, InSymbol a, T &&b, State to) {
+		addTransition(from, a, get<1>(monoid).from(b), to);
+	}
+
 	/// re-creates a value that was produced by a different (but structurally
 	/// identical) monoid instance inside this FST's own monoid -- see
 	/// SparseFST::reintern.
 	Value reintern(const Monoid &src, const Value &v) {
 		const auto &[a, b] = v;
-		return Value(a, monoid.template getMonoid<1>().own(src.template getMonoid<1>(), b));
+		return Value(a, get<1>(monoid).own(get<1>(src), b));
 	}
 
 	/// insert v into f_eps if it isn't already there (dedup via the owning monoid's equal())
 	void addFEps(OutValue v) {
-		auto &outMonoid = monoid.template getMonoid<1>();
 		for (const auto &existing : f_eps) {
-			if (outMonoid.equal(existing, v)) return;
+			if (get<1>(monoid).equal(existing, v)) return;
 		}
 		f_eps.push_back(std::move(v));
 	}
@@ -100,34 +105,33 @@ class ExpandedFST {
 		}
 		for (const auto &[from, value] : transitions) {
 			const auto &[label, to] = value;
-			auto [w1, w2]			= monoid.gen(label);
-			out << "  " << from << " -> " << to << " [label=\"<";
-			if constexpr (OStreamable<InSymbol>) {
-				for (const auto &c : w1)
-					out << c;
-			} else {
-				out << "unprintable";
-			}
-			out << ", ";
-			if constexpr (OStreamable<typename OutputMonoid::Symbol>) {
-				for (const auto &c : w2)
-					out << c;
-			} else {
-				out << "unprintable";
-			}
-			out << ">\"];\n";
+			out << "  " << from << " -> " << to << " [label=\"";
+			out << print_if_can(monoid, label);
+			out << "\"];\n";
 		}
 		out << "}\n";
 	}
 
+	const auto &GetMonoid() const { return monoid; }
+
 	const auto &Initial() const { return qFirsts; }
+	auto		Initial()		 &&{ return std::ranges::owning_view{std::move(qFirsts)}; }
 	bool		IsInitial(State q) const { return qFirsts.contains(q); }
+
 	const auto &Final() const { return qFinals; }
+	auto		Final()		   &&{ return std::ranges::owning_view{std::move(qFinals)}; }
+
 	bool		IsFinal(State q) const { return qFinals.contains(q); }
 	std::size_t Size() const { return N; }
 	auto		Transitions(State q) const {
 		auto [begin, end] = transitions.equal_range(q);
 		return std::ranges::subrange(begin, end) | std::views::values;
+	}
+	auto Transitions() const {
+		return transitions | std::views::transform([](const auto &pair) {
+				   const auto &[label, to] = pair.second;
+				   return std::make_tuple(pair.first, label, to);
+			   });
 	}
 };
 
@@ -157,52 +161,57 @@ auto fEpsAsValues(const ExpandedFST<Symbol, M> &fsa) {
 /// transitions, greedily attaching output symbols one at a time to the
 /// input-symbol hop they line up with, and dumping any leftover output (when
 /// |w1| < |w2|) or leftover input (when |w1| > |w2|) onto the last hop.
-template <symbol Symbol>
-auto expandFST(StringFST<Symbol> &&fst) {
-	ExpandedFST<Symbol, InterningMonoid<Symbol>> expanded;
-	using State	   = typename ExpandedFST<Symbol, InterningMonoid<Symbol>>::State;
-	using OutValue = typename ExpandedFST<Symbol, InterningMonoid<Symbol>>::OutValue;
+template <free_monoid I, monoid M>
+auto expandFST(SparseFST<I, M> &&fst) {
+	using Symbol = typename I::Symbol;
+	ExpandedFST<Symbol, M> expanded;
+	using State	   = typename ExpandedFST<Symbol, M>::State;
+	using OutValue = typename ExpandedFST<Symbol, M>::OutValue;
 
 	expanded.N		 = fst.N;
 	expanded.qFirsts = std::move(fst.qFirsts);
 	expanded.qFinals = std::move(fst.qFinals);
 
-	auto &outMonoid = expanded.monoid.template getMonoid<1>();
+	const auto &outMonoid = get<1>(expanded.monoid);
 
 	for (const auto &[from, value] : fst.transitions) {
 		const auto &[label, to] = value;
 		auto [w1, w2]			= fst.monoid.gen(label);
 		if (fst.template isIdentityOnTape<0>(label)) {
-			OutValue new_val = outMonoid.own(fst.monoid.template getMonoid<1>(), std::get<1>(label));
+			OutValue new_val = outMonoid.own(get<1>(fst.monoid), std::get<1>(label));
 			expanded.addTransition(from, Symbol::eps, new_val, to);
 			continue;
 		}
 		State prev = from;
 
 		if (w1.size() < w2.size()) {	 // |w1| < |w2|
-			assert(w1.size() > 0);
-			for (unsigned int i = 0; i < w1.size() - 1; ++i) {
-				const auto &a	  = w1[i];
-				const auto &b	  = w2[i];
-				State		next  = expanded.newState();
-				OutValue	w2val = outMonoid.create(std::span{&b, &b + 1});
+			assert(w2.size() > 0);
+			auto i1 = w1.begin();
+			auto i2 = w2.begin();
+			for (uint32_t i = 0; i < w1.size() - 1; ++i) {
+				const auto &a	  = *i1++;
+				const auto &b	  = *i2++;
+				State		next  = (i1 == w1.end()) ? to : expanded.newState();
+				OutValue	w2val = outMonoid.from(std::span{&b, 1});
 				expanded.addTransition(prev, a, w2val, next);
 				prev = next;
 			}
-			OutValue w2val = outMonoid.create(std::span{w2.data() + w1.size() - 1, w2.size() - w1.size() + 1});
-			expanded.addTransition(prev, w1.back(), w2val, to);
+			OutValue w2val = outMonoid.from(std::span{i2, w2.end()});
+			expanded.addTransition(prev, *i1, w2val, to);
 		} else {
-			for (unsigned int i = 0; i < w2.size(); ++i) {
-				const auto &a	  = w1[i];
-				const auto &b	  = w2[i];
-				State		next  = (i == w1.size() - 1) ? to : expanded.newState();
-				OutValue	w2val = outMonoid.create(std::span{&b, &b + 1});
+			auto i1 = w1.begin();
+			auto i2 = w2.begin();
+			while (i2 != w2.end()) {
+				const auto &a	  = *i1++;
+				const auto &b	  = *i2++;
+				State		next  = (i2 == w2.end() && i1 == w1.end()) ? to : expanded.newState();
+				OutValue	w2val = outMonoid.from(std::span{&b, 1});
 				expanded.addTransition(prev, a, w2val, next);
 				prev = next;
 			}
-			for (unsigned int i = w2.size(); i < w1.size(); ++i) {
-				const auto &a	 = w1[i];
-				State		next = (i == w1.size() - 1) ? to : expanded.newState();
+			while (i1 != w1.end()) {
+				const auto &a	 = *i1++;
+				State		next = (i1 == w1.end()) ? to : expanded.newState();
 				expanded.addTransition(prev, a, InterningMonoid<Symbol>::identity, next);
 				prev = next;
 			}
@@ -212,18 +221,6 @@ auto expandFST(StringFST<Symbol> &&fst) {
 	return expanded;
 }
 
-template <symbol Symbol, monoid M>
-void drawFSA(const ExpandedFST<Symbol, M> &fsa) {
-	ShellProcess p("dot -Tsvg > a.svg && feh ./a.svg");
-	fsa.print(p.in());
-	p.in() << std::endl;
-	p.in().close();
-	p.wait();
-	auto out = getString(p.out()), err = getString(p.err());
-	if (!out.empty()) std::cout << out << std::endl;
-	if (!err.empty()) std::cout << err << std::endl;
-}
-
 // https://lml.bas.bg/~stoyan/finite-state-techniques.pdf#theorem.4.4.8
 template <symbol Symbol>
 auto removeUpperEpsilonFST(ExpandedFST<Symbol, InterningMonoid<Symbol>> &&fsa) {
@@ -231,7 +228,7 @@ auto removeUpperEpsilonFST(ExpandedFST<Symbol, InterningMonoid<Symbol>> &&fsa) {
 	using State	   = typename FSA_t::State;
 	using OutValue = typename FSA_t::OutValue;
 
-	auto &outMonoid = fsa.monoid.template getMonoid<1>();
+	auto &outMonoid = get<1>(fsa.monoid);
 
 	std::stack<int>													 stack;
 	std::vector<bool>												 visited(fsa.N, false);
@@ -268,7 +265,7 @@ auto removeUpperEpsilonFST(ExpandedFST<Symbol, InterningMonoid<Symbol>> &&fsa) {
 		for (const auto &[c, w] : closure[i]) {
 			if (fsa.qFinals.contains(c)) {
 				fsa.qFinals.insert(i);
-				fsa.addFEps(outMonoid.create(w));	  // f(eps)
+				fsa.addFEps(outMonoid.from(w));		// f(eps)
 			}
 		}
 	}
@@ -292,7 +289,7 @@ auto removeUpperEpsilonFST(ExpandedFST<Symbol, InterningMonoid<Symbol>> &&fsa) {
 					auto new_word = u;
 					new_word.insert(new_word.end(), v.begin(), v.end());
 					new_word.insert(new_word.end(), w.begin(), w.end());
-					OutValue new_val = outMonoid.create(new_word);
+					OutValue new_val = outMonoid.from(new_word);
 					new_transitions.insert({q1, {typename FSA_t::Value(sigma, new_val), q2}});
 				}
 			}
@@ -502,7 +499,9 @@ auto pseudoDeterminizeFST(ExpandedFST<Symbol, M> &&fst) {
 	// the subset construction only ever visits states reachable from
 	// fst.qFirsts (the BFS over `queue`) -- pool entries that were only
 	// referenced by transitions out of unreached states are now dead.
-	if constexpr (compactable_monoid<Monoid>) { dfa.monoid.compact(transitionValues(dfa.transitions), fEpsAsValues(dfa)); }
+	if constexpr (compactable_monoid<Monoid>) {
+		dfa.monoid.compact(transitionValues(dfa.transitions), fEpsAsValues(dfa));
+	}
 
 	return dfa;
 }

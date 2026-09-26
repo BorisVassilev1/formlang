@@ -4,7 +4,9 @@
 #include <map>
 
 #include "ExpandedFST.hpp"
+#include "InterningMonoid.hpp"
 #include "concepts.hpp"
+#include "transducer_concepts.hpp"
 #include "wordset.hpp"
 #include "debug.hpp"
 #include "datastructures.hpp"
@@ -14,39 +16,83 @@ template <symbol Symbol>
 class OutputFSA;
 
 // Subsequential Finite-State Transducer (SSFST)
-template <symbol Symbol>
+template <symbol Symbol, free_monoid M = InterningMonoid<Symbol>>
 class SparseSSFST {
    public:
-	using State	   = unsigned int;
-	using StringID = WordSet<Symbol>::WordID;
-	using Map	   = fl::unordered_map<std::tuple<State, Symbol>, std::pair<StringID, State>>;
-	using Letter_t = Symbol;
+	using State = unsigned int;
+
+	using Monoid = CartesianMonoid<SymbolMonoid<Symbol>, M>;
+
+	constexpr static bool deterministic = true;
+	constexpr static bool sorted_arcs	= true;
 
    private:
-	WordSet<Symbol>					   words;
-	Map								   transitions;
-	fl::unordered_set<State>		   qFinals;
-	unsigned int					   N = 0;
-	fl::unordered_map<State, StringID> output;
+	using OutputMonoid = M;
+	using OutValue	   = OutputMonoid::Value;
+	using OutSymbol	   = OutputMonoid::Symbol;
+	using Map =
+		unordered_map<std::tuple<State, Symbol>, std::pair<OutValue, State>, cartesian_hash<hash<State>, hash<Symbol>>>;
+
+	Monoid						   monoid;
+	Map							   transitions;
+	unordered_set<State>		   qFinals;
+	unsigned int				   N = 0;
+	unordered_map<State, OutValue> output;
+
+	// We use vector because noone cares about individual states and delays
+	using BigState			 = std::vector<std::tuple<State, typename M::Value>>;
+	using IntermediateStates = std::vector<std::reference_wrapper<const BigState>>;
+
+	void printIntermediate(const IntermediateStates &states, std::ostream &out) const {
+		out << "digraph SparseSSFST {\n";
+		out << "  rankdir=LR;\n";
+		out << "  node [shape=circle];\n";
+		out << "  init [label=\"N=" << states.size() << "\", shape=square];\n";
+		out << "  init -> 0;\n";	 // initial state
+		for (const auto [i, state] : std::ranges::views::enumerate(states)) {
+			out << "  " << i << " [label=\"";
+			for (const auto &[q, id] : state.get()) {
+				out << "(" << q << ", ";
+				out << print_if_can(get<1>(monoid), id);
+				out << ")\n ";
+			}
+			out << "\"";
+			if (qFinals.contains(i)) out << ", shape=doublecircle";		// final states
+			out << "];\n";
+		}
+
+		for (const auto &[from, value] : transitions) {
+			const auto &[s, l]		   = from;
+			const auto &[outputID, to] = value;
+			out << "  " << s << " -> " << to << " [label=\"<" << l << ", ";
+			out << print_if_can(get<1>(monoid), outputID);
+			out << ">\"];\n";
+		}
+		out << "}\n";
+	}
+
+	void drawIntermediate(const IntermediateStates &states) const {
+		ShellProcess p("dot -Tsvg > a.svg && feh ./a.svg");
+		printIntermediate(states, p.in());
+		p.in() << std::endl;
+		p.in().close();
+		p.wait();
+		std::cout << getString(p.out()) << std::endl;
+		std::cout << getString(p.err()) << std::endl;
+	}
 
    public:
-	SparseSSFST() = default;
+	SparseSSFST() : transitions(0) {}
 
 	// accepts a trimmed ExpandedFST and builds a subsequential finite-state transducer
 	// tests for bounded variation
-	SparseSSFST(ExpandedFST<Symbol, InterningMonoid<Symbol>> &&fsa, bool resolveNonFunctionality = false) {
-		unsigned int C = 0;
-		for (auto w : fsa.words) {
-			if (w.size() > C) C = w.size();
-		}
-		auto MAX_DELAY = C * fsa.N * fsa.N;		// C * |Q|^2
-		auto curr_max  = 0u;
+	SparseSSFST(ExpandedFST<Symbol, M> &&fsa, bool resolveNonFunctionality = false) : transitions(0) {
+		unsigned int C		   = get<1>(fsa.GetMonoid()).C();
+		auto		 MAX_DELAY = C * fsa.N * fsa.N;		// C * |Q|^2
+		auto		 curr_max  = 0u;
 
-		UniqueWordSet<Symbol> stateDelays;
-		using DelayID = UniqueWordSet<Symbol>::WordID;
-
-		// We use vector because noone cares about individual states and delays
-		using BigState = std::vector<std::tuple<State, DelayID>>;
+		const auto &fsa_output = get<1>(fsa.monoid);
+		const auto &output	   = get<1>(monoid);
 
 		std::vector<std::reference_wrapper<const BigState>> states;		// states of the SSFST
 		std::map<BigState, State> stateMap;								// maps sets of states to index in states vector
@@ -56,13 +102,12 @@ class SparseSSFST {
 		std::stack<State> queue;
 
 		if (!fsa.f_eps.empty()) {
-			auto wordID		= *fsa.f_eps.begin();
-			this->output[0] = words.addWord(fsa.words[wordID]);		// output for the initial state
+			this->output[0] = output.own(fsa_output, *fsa.f_eps.begin());	  // output for the initial state
 		}
 
 		BigState initial;
 		for (const auto &q : fsa.qFirsts) {
-			initial.push_back({q, 0});
+			initial.push_back({q, output.identity});
 			if (fsa.qFinals.contains(q)) { qFinals.insert(0); }
 		}
 		std::sort(initial.begin(), initial.end());
@@ -76,71 +121,64 @@ class SparseSSFST {
 		SlowDown sd(100ms);
 		uint64_t processedStates = 0;
 
+		// InterningMonoid<Symbol> temporaryWords;		// used for the new state delays
+		std::vector<BigState> nextStates;
+		std::vector<std::reference_wrapper<typename Map::value_type>>
+			currentTransitions;		// transitions from the current state
 		while (!queue.empty()) {
 			State current = queue.top();
 			queue.pop();
 			const BigState &currentState = states[current];
 			processedStates += currentState.size();
 
-			static WordSet<Symbol>		 temporaryWords;	 // used for the new state delays
-			static std::vector<BigState> nextStates;
-			static std::vector<std::reference_wrapper<typename Map::value_type>>
-				  currentTransitions;	  // transitions for the current state
 			State nextState		= 0;
-			auto  localNewState = [&nextState]() {
+			auto  localNewState = [&nextState, &nextStates]() {
 				auto &ref = nextStates.emplace_back();
 				return std::tuple(std::reference_wrapper{ref}, nextState++);
 			};
 
 			// for each (q,w) in the current state
-			for (const auto &[q, delay_id] : currentState) {
-				auto oldDelay		  = stateDelays[delay_id];
+			for (const auto &[q, delay] : currentState) {
 				const auto [it1, it2] = fsa.transitions.equal_range(q);
 				for (const auto &[_, right] : std::ranges::subrange(it1, it2)) {
-					const auto &[s, id, next] = right;
+					const auto &[val, next] = right;
+					const auto &[s, w]		= val;
+
+					auto currentOutput = output.own(fsa_output, w);			   // the output for this transition
+					auto wordToDelay   = output.mul(delay, currentOutput);	   // concat
 
 					auto it = transitions.find({current, s});	  // for each transition from 'current' with letter 's'
 					if (it == transitions.end()) {
 						// create a new transition
-						auto wordToDelay  = std::views::concat(oldDelay, fsa.words[id]);
-						auto new_id		  = words.addWord(wordToDelay);
-						auto temp_id	  = temporaryWords.addWord(wordToDelay);
 						auto [to, to_ind] = localNewState();
-						auto [t_it, b]	  = transitions.insert({{current, s}, {new_id, to_ind}});
+						auto [t_it, b]	  = transitions.insert({{current, s}, {wordToDelay, to_ind}});
 						currentTransitions.emplace_back(std::ref(*t_it));
-						to.get().emplace_back(next, temp_id);
+						to.get().emplace_back(next, wordToDelay);
+
 					} else {
-						auto &[_, rhs]		= *it;
-						auto &[outputID, n] = rhs;
+						auto &[_, rhs]		 = *it;
+						auto &[bigOutput, n] = rhs;
+
 						// update the existing transition
-						auto  wordToDelay = std::views::concat(oldDelay, fsa.words[id]);
-						auto  temp_id	  = temporaryWords.addWord(wordToDelay);
-						auto  outputWord  = words[outputID];
-						auto  i			  = commonPrefixLen(wordToDelay, outputWord);
-						auto &nextBig	  = nextStates[n];
-						words.replaceWithSubstr(outputID, 0, i);
-						nextBig.emplace_back(next, temp_id);
+						auto  gcp	  = output.gcp(wordToDelay, bigOutput);
+						auto &nextBig = nextStates[n];
+						bigOutput	  = gcp;
+						nextBig.emplace_back(next, wordToDelay);
 					}
 				}
 			}
 
 			for (const auto &ref : currentTransitions) {
-				auto &[_, rhs]		 = ref.get();
-				auto &[outputID, to] = rhs;
-				auto &nextBig		 = nextStates[to];
+				auto &[_, rhs]	   = ref.get();
+				auto &[output, to] = rhs;
+				auto &nextBig	   = nextStates[to];
 
-				for (auto &[q, delay_id] : nextBig) {
-					auto wrongDelay = temporaryWords[delay_id];
-					auto eaten		= words[outputID].size();
-
-					if (wrongDelay.size() > curr_max) { curr_max = wrongDelay.size(); }
-					if (wrongDelay.size() - eaten > MAX_DELAY) {
+				for (auto &[q, delay] : nextBig) {
+					delay = get<1>(monoid).invMul(output, delay);
+					if (get<1>(monoid).size(delay) > curr_max) { curr_max = get<1>(monoid).size(delay); }
+					if (get<1>(monoid).size(delay) > MAX_DELAY) {
 						throw std::runtime_error("Delay too long, bounded variation not satisfied");
 					}
-
-					auto new_id =
-						stateDelays.addWord((Symbol *)&*wrongDelay.begin() + eaten, wrongDelay.size() - eaten);
-					delay_id = new_id;
 				}
 			}
 
@@ -162,17 +200,18 @@ class SparseSSFST {
 				stateRemap[i]  = newIndex;
 
 				State bestOutToKeep = -1;
-				for (const auto &[q, delayID] : nextState) {
+				for (const auto &[q, delay] : nextState) {
 					if (fsa.qFinals.contains(q)) {
 						qFinals.insert(newIndex);
-						auto output = words.addWord(stateDelays[delayID]);
+						auto output = delay;	 // output for this final state is the delay
+
 						// if there is already an output for this state and it is different
-						if (this->output.contains(newIndex) &&
-							!std::ranges::equal(stateDelays[delayID], words[this->output[newIndex]])) {
+						if (this->output.contains(newIndex) && !get<1>(monoid).equal(delay, this->output[newIndex])) {
 							if (!resolveNonFunctionality)
 								throw std::runtime_error(
 									std::format("Non-functionality detected at state {} between outputs {} and {}",
-												newIndex, stateDelays[delayID], words[this->output[newIndex]]));
+												newIndex, print_if_can(get<1>(monoid), delay),
+												print_if_can(get<1>(monoid), this->output[newIndex])));
 							else {
 								// try to resolve by choosing the output that ends in this state
 								assert(bestOutToKeep != -1ull);
@@ -182,8 +221,8 @@ class SparseSSFST {
 								bool bestHasFuture = b1 != e1;
 								bool currHasFuture = b2 != e2;
 								std::cout << "conflict at state " << newIndex << " between outputs "
-										  << words[this->output[newIndex]][0] << " and " << words[output][0]
-										  << std::endl;
+										  << print_if_can(get<1>(monoid), this->output[newIndex]) << " and "
+										  << print_if_can(get<1>(monoid), output) << std::endl;
 
 								if (bestHasFuture && currHasFuture) {
 									throw std::runtime_error(
@@ -221,126 +260,62 @@ class SparseSSFST {
 			});
 
 			// if (curr_max >= 1) {
-			//	ShellProcess p("dot -Tsvg > a.svg && feh ./a.svg");
-			//	auto		&in = p.in();
-			//	in << "digraph SparseSSFST {\n";
-			//	in << "  rankdir=LR;\n";
-			//	in << "  node [shape=circle];\n";
-			//	in << "  init [label=\"N=" << states.size() << "\", shape=square];\n";
-			//	in << "  init -> 0;\n";		// initial state
-			//	for (const auto [i, state] : std::ranges::views::enumerate(states)) {
-			//		in << "  " << i << " [label=\"";
-			//		for (const auto &[q, id] : state.get()) {
-			//			in << "(" << q << ", ";
-			//			for (const auto &letter : stateDelays[id]) {
-			//				if (uint8_t(letter) < 128 && uint8_t(letter) >= 32) in << letter;
-			//				else in << (int)letter;
-			//			}
-			//			in << ")\n ";
-			//		}
-			//		in << "\"";
-			//		if (qFinals.contains(i)) in << ", shape=doublecircle";
-			//		in << "];\n";	  // final States
-			//	}
-
-			//	for (const auto &[from, value] : transitions) {
-			//		const auto &[s, l]		   = from;
-			//		const auto &[outputID, to] = value;
-			//		in << "  " << s << " -> " << to << " [label=\"<" << l << ", ";
-			//		for (const auto &letter : words[outputID]) {
-			//			if (uint8_t(letter) < 128 && uint8_t(letter) >= 32) in << letter;
-			//			else in << (int)letter;
-			//		}
-			//		in << ">\"];\n";
-			//	}
-			//	in << "}\n";
-
-			//	p.in() << std::endl;
-			//	p.in().close();
-			//	p.wait();
-			//	std::cout << getString(p.out()) << std::endl;
-			//	std::cout << getString(p.err()) << std::endl;
+			// drawIntermediate(states);
 			//}
 
 			// clear temporary data to conserve memory allocation
 			nextStates.clear();
 			currentTransitions.clear();
-			temporaryWords.clear();
 		}
 		this->N = states.size();
 
 		// print in dot format
-		if (N < 100) {
-			ShellProcess p("dot -Tsvg > a.svg && feh ./a.svg");
-			auto		&in = p.in();
-			in << "digraph SparseSSFST {\n";
-			in << "  rankdir=LR;\n";
-			in << "  node [shape=circle];\n";
-			in << "  init [label=\"N=" << states.size() << "\", shape=square];\n";
-			in << "  init -> 0;\n";		// initial state
-			for (const auto [i, state] : std::ranges::views::enumerate(states)) {
-				in << "  " << i << " [label=\"";
-				for (const auto &[q, id] : state.get()) {
-					in << "(" << q << ", ";
-					for (const auto &letter : stateDelays[id]) {
-						if ((uint8_t(letter) < 128 && uint8_t(letter) >= 32) || size_t(letter) > 256) in << letter;
-						else in << (int)letter;
-					}
-					in << ")\n ";
-				}
-				in << "\"";
-				if (qFinals.contains(i)) in << ", shape=doublecircle";
-				in << "];\n";	  // final States
-			}
-
-			for (const auto &[from, value] : transitions) {
-				const auto &[s, l]		   = from;
-				const auto &[outputID, to] = value;
-				in << "  " << s << " -> " << to << " [label=\"<" << l << ", ";
-				for (const auto &letter : words[outputID]) {
-					if ((uint8_t(letter) < 128 && uint8_t(letter) >= 32) || size_t(letter) > 256) in << letter;
-					else in << (int)letter;
-				}
-				in << ">\"];\n";
-			}
-			in << "}\n";
-
-			p.in() << std::endl;
-			p.in().close();
-			p.wait();
-			std::cout << getString(p.out()) << std::endl;
-			std::cout << getString(p.err()) << std::endl;
-		}
+		if (N < 100) { drawIntermediate(states); }
 		std::cout << std::endl;
 	}
 
-	[[clang::always_inline]] inline std::size_t size() const { return N; }
-	[[clang::always_inline]] inline State		initial() const { return 0; }
-	[[clang::always_inline]] inline bool		isFinal(State s) const { return qFinals.contains(s); }
-	[[clang::always_inline]] inline std::pair<std::span<const Symbol>, bool> step(State &s, Symbol l) const {
-		auto it = transitions.find({s, l});
-		if (it == transitions.end()) return std::pair{std::span<const Symbol>{}, false};
-		const auto &[outputID, next] = it->second;
-		s							 = next;
-		return std::pair{std::span<const Symbol>(words[outputID]), true};
-	}
-	[[clang::always_inline]] inline std::span<const Symbol> psi(State s) const {
-		if (!qFinals.contains(s)) return std::span<const Symbol>{};
-		return std::span<const Symbol>(words[output.at(s)]);
+	const auto &GetMonoid() const { return monoid; }
+
+	[[clang::always_inline]] inline std::size_t			 Size() const { return N; }
+	[[clang::always_inline]] inline std::array<State, 1> Initial() const { return {0}; }
+	[[clang::always_inline]] inline bool				 IsInitial(State s) const { return s == 0; }
+	[[clang::always_inline]] inline const auto			&Final() const { return qFinals; }
+	[[clang::always_inline]] inline bool				 IsFinal(State s) const { return qFinals.contains(s); }
+
+	[[clang::always_inline]] inline OutputMonoid::Value Psi(State s) const {
+		if (!qFinals.contains(s)) return get<1>(monoid).identity;
+		return output.at(s);
 	}
 
-	auto f(const std::vector<Symbol> &input) const {
-		std::vector<Symbol> output;
-		State				current = 0;	 // initial state
+	[[clang::always_inline]] inline std::optional<std::tuple<OutValue, State>> Transition(
+		State s, typename get_input_t<Monoid>::Symbol l) const {
+		auto it = transitions.find({s, l});
+		if (it == transitions.end()) return std::nullopt;
+		return it->second;
+	}
+
+	[[clang::always_inline]] inline auto Transitions() const {
+		return std::views::transform(transitions, [](const auto &p) {
+			const auto &[from, value]  = p;
+			const auto &[s, l]		   = from;
+			const auto &[outputID, to] = value;
+			return std::tuple(s, typename Monoid::Value{l, outputID}, to);
+		});
+	}
+
+	auto f(const std::vector<OutSymbol> &input) const {
+		std::vector<OutSymbol> output;
+		State				   current = 0;		// initial state
 		for (const auto &letter : input) {
 			auto it = transitions.find({current, letter});
 			if (it == transitions.end()) return std::pair{output, false};
 			const auto &[outputID, next] = it->second;
-			output.insert(output.end(), words[outputID].begin(), words[outputID].end());
+			const auto &out				 = get<1>(monoid).gen(outputID);
+			output.insert(output.end(), out.begin(), out.end());
 			current = next;
 		}
 		if (qFinals.contains(current)) {
-			auto word = words[this->output.at(current)];
+			auto word = get<1>(monoid).gen(this->output.at(current));
 			output.insert(output.end(), word.begin(), word.end());
 		} else return std::pair{output, false};		// not in final state
 		return std::pair{output, true};				// in final state
@@ -355,10 +330,7 @@ class SparseSSFST {
 		for (const auto &q : qFinals) {
 			if (qFinals.contains(q)) {
 				out << "  " << q << " [shape=doublecircle, label=\"";
-				for (const auto &letter : words[output.at(q)]) {
-					if ((uint8_t(letter) < 128 && uint8_t(letter) >= 32) || size_t(letter) > 256) out << letter;
-					else out << (int)letter;
-				}
+				out << print_if_can(get<1>(monoid), output.at(q));
 				out << "\"];\n";									   // final States with output
 			} else out << "  " << q << " [shape=doublecircle];\n";	   // final States
 		}
@@ -366,10 +338,7 @@ class SparseSSFST {
 			const auto &[s, l]		   = from;
 			const auto &[outputID, to] = value;
 			out << "  " << s << " -> " << to << " [label=\"<" << l << ", ";
-			for (const auto &letter : words[outputID]) {
-				if ((uint8_t(letter) < 128 && uint8_t(letter) >= 32) || size_t(letter) > 256) out << letter;
-				else out << (int)letter;
-			}
+			out << print_if_can(get<1>(monoid), outputID);
 			out << ">\"];\n";
 		}
 		out << "}\n";
@@ -412,7 +381,7 @@ class SparseSSFST {
 		}
 		for (std::size_t s = 0; s < N; ++s) {
 			if (qFinals.contains(State(s))) {
-				packed.output[s] = words[output.at(State(s))][0];
+				packed.output[s] = *get<1>(monoid).gen(output.at(State(s))).begin();
 			} else {
 				packed.output[s] = Symbol::eof;
 			}
@@ -442,30 +411,15 @@ class SparseSSFST {
 	void printInfo(std::ostream &out) const {
 		out << std::format("SparseSSFST has {} states and {} transitions.\n", N, transitions.size());
 		out << std::format("Average transitions per state: {:.2f}\n", static_cast<double>(transitions.size()) / N);
-		std::map<State, int> transitionCount;
-		for (const auto &[_, value] : transitions) {
-			const auto &[_, to] = value;
-			transitionCount[to]++;
-		}
 		out << std::format("Number of final states: {}\n", qFinals.size());
-		out << std::format("Words stored: {}\n", words.size());
-		out << std::format("Words cache size: {}\n", words.totalLength());
+		if constexpr (requires { get<1>(monoid).totalWordCount(); })
+			out << std::format("Words stored: {}\n", get<1>(monoid).totalWordCount());
+		if constexpr (requires { get<1>(monoid).poolByteCount(); })
+			out << std::format("Words cache size: {}\n", get<1>(monoid).poolByteCount());
 	}
 
 	friend class OutputFSA<Symbol>;
 };
-
-template <class Symbol>
-void drawFSA(const SparseSSFST<Symbol> &fsa) {
-	ShellProcess p("dot -Tsvg > a.svg && feh ./a.svg");
-	fsa.print(p.in());
-	p.in() << std::endl;
-	p.in().close();
-	p.wait();
-	auto out = getString(p.out()), err = getString(p.err());
-	if (!out.empty()) std::cout << out << std::endl;
-	if (!err.empty()) std::cout << err << std::endl;
-}
 
 template <class Symbol>
 void statFSA(const SparseSSFST<Symbol> &fsa) {
@@ -475,57 +429,10 @@ void statFSA(const SparseSSFST<Symbol> &fsa) {
 }	  // namespace fl
 
 #include "letter.hpp"
-static_assert(fl::SSFST<fl::SparseSSFST<fl::Letter>>,
-			  "SparseSSFST does not satisfy the subsequential transducer concept");
+namespace {
+using SSFSTType = fl::SparseSSFST<fl::Letter, fl::InterningMonoid<fl::Letter>>;
 
-namespace fl {
-
-template <class Transducer>
-	requires(SSFST<Transducer> && !SSFSTI<Transducer>)
-class SSFSTTraverser {
-	using Symbol = typename Transducer::Letter_t;
-	using State	 = typename Transducer::State;
-
-	const Transducer &ssft;
-
-   public:
-	State current;
-
-	SSFSTTraverser(const Transducer &ssft) : ssft(ssft), current(0) {}
-
-	template <std::ranges::input_range R>
-	auto traverseOutputOnlyUntilCan(R &&input) {
-		current = ssft.initial();
-		for (const auto &letter : input) {
-			auto [out_span, ok] = ssft.step(current, letter);
-			if (!ok) return out_span;
-		}
-		if (ssft.isFinal(current)) {
-			return ssft.psi(current);
-		} else return std::span<const Symbol>{};
-	}
-
-	template <class Iterator, class Sentinel>
-	std::pair<std::optional<Symbol>, int> traverseOutputOnlyUntilCan(Iterator &begin, Sentinel &&end) {
-		current = ssft.initial();
-		int len = 0;
-		for (; begin != end; ++begin) {
-			auto [out_span, ok] = step(*begin);
-			if (!ok) break;
-			++len;
-		}
-		if (len == 0) {
-			// this function should move at least one step, otherwise the caller would need to do checks
-			// to avoid infinite loops.
-			++begin;
-			++len;
-		}
-		if (ssft.isFinal(current)) {
-			const auto &out = ssft.psi(current);
-			assert(out.size() == 1);
-			return std::make_pair(out[0], len);
-		} else return std::make_pair(std::nullopt, len);
-	}
-};
-
-}	  // namespace fl
+static_assert(fl::SSFST<SSFSTType>, "SparseSSFST does not satisfy the subsequential transducer concept");
+static_assert(fl::SSFST_traversable<SSFSTType>,
+			  "SparseSSFST does not satisfy the subsequential transducer traversable concept");
+}	  // namespace

@@ -18,7 +18,7 @@ using SSFST_t = SparseSSFST<Letter>;
 auto toSymbol(const char *s) { return fl::toSymbol<Letter>(s); }
 
 void test_determinization() {
-	ExpandedFST<KleeneMonoid<Letter>> fsa;
+	ExpandedFST<Letter, InterningMonoid<Letter>> fsa;
 	fsa.N		= 8;
 	fsa.qFirsts = {0, 1};
 	fsa.qFinals = {3, 6, 7};
@@ -51,7 +51,7 @@ void test_determinization() {
 }
 
 void test_bounded_variation() {
-	ExpandedFST<KleeneMonoid<Letter>> efst;
+	ExpandedFST<Letter, InterningMonoid<Letter>> efst;
 	efst.N		 = 4;
 	efst.qFirsts = {0};
 	efst.qFinals = {0, 1, 3};
@@ -116,8 +116,8 @@ void test_replace() {
 	fsa = removeUpperEpsilonFST(std::move(fsa));
 	// drawFSA(fsa);
 	fsa = trimFSA(std::move(fsa));
-	std::cout << "FSA has " << fsa.N << " states and " << fsa.transitions.size() << " transitions and "
-			  << fsa.words.size() << " words as REALTIME." << std::endl;
+	std::cout << "FSA has " << fsa.N << " states and " << fsa.transitions.size() << " transitions as REALTIME."
+			  << std::endl;
 
 	bool functional = isFunctional(fsa);
 	std::cout << "functional: " << functional << std::endl;

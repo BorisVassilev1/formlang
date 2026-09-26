@@ -2,9 +2,11 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <functional>
 #include <iostream>
 #include <string>
+#include "pipes.hpp"
 
 namespace fl {
 
@@ -13,11 +15,11 @@ class RangeFromPair : public std::ranges::view_interface<RangeFromPair<T>> {
 	T range;
 
    public:
-	using iterator = decltype(std::declval<T>().first);
-	using sentinel = decltype(std::declval<T>().second);
-	using value_type = std::remove_reference_t<decltype(*std::declval<iterator>())>;
+	using iterator		  = decltype(std::declval<T>().first);
+	using sentinel		  = decltype(std::declval<T>().second);
+	using value_type	  = std::remove_reference_t<decltype(*std::declval<iterator>())>;
 	using difference_type = std::ptrdiff_t;
-	using reference = value_type &;
+	using reference		  = value_type &;
 	using const_reference = const value_type &;
 
 	template <class U>
@@ -151,5 +153,16 @@ class Timer {
 	auto elapsed_us() const { return std::chrono::duration_cast<std::chrono::microseconds>(elapsed()).count(); }
 	auto elapsed_ns() const { return std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed()).count(); }
 };
+
+template <class T>
+void drawFSA(const T &fsa) {
+	ShellProcess p("dot -Tsvg > a.svg && feh ./a.svg");
+	fsa.print(p.in());
+	p.in() << std::endl;
+	p.in().close();
+	p.wait();
+	std::cout << getString(p.out()) << std::endl;
+	std::cout << getString(p.err()) << std::endl;
+}
 
 }	  // namespace fl

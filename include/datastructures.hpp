@@ -6,14 +6,14 @@
 #include "hashing.hpp"
 
 namespace fl {
-template <class K, class V, class H = fl::hash<K>>
-using unordered_map = std::unordered_map<K, V, H>;
+template <class K, class V, class H = fl::hash<K>, class E = std::equal_to<K>>
+using unordered_map = std::unordered_map<K, V, H, E>;
 
-template <class K, class H = fl::hash<K>>
-using unordered_set = std::unordered_set<K, H>;
+template <class K, class H = fl::hash<K>, class E = std::equal_to<K>>
+using unordered_set = std::unordered_set<K, H, E>;
 
-template <class K, class V, class H = fl::hash<K>>
-using unordered_multimap = std::unordered_multimap<K, V, H>;
+template <class K, class V, class H = fl::hash<K>, class E = std::equal_to<K>>
+using unordered_multimap = std::unordered_multimap<K, V, H, E>;
 
 template <class T>
 std::string toString(T &&t) {

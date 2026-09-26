@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "concepts.hpp"
+#include "formatting.hpp"
 #include "hashing.hpp"
 
 namespace fl {
@@ -31,9 +32,27 @@ namespace fl {
 template <class Owned, std::size_t... Slots>
 class SharedCartesianMonoid;	 // primary template intentionally undefined; Owned must be a std::tuple
 
+struct CartesianMonoidBase {};
+
+template <class C>
+concept cartesian_monoid = std::derived_from<std::remove_cvref_t<C>, CartesianMonoidBase>;
+
+template <std::size_t I, cartesian_monoid C>
+constexpr decltype(auto) get(C &&cartesian);
+
+template <cartesian_monoid C>
+constexpr decltype(auto) in(C &&cartesian);
+template <cartesian_monoid C>
+constexpr decltype(auto) out(C &&cartesian);
+
+template <class OwnedTs, std::size_t... Slots>
+	requires(sizeof...(Slots) >= 1)
+struct CartesianMonoidElementPrinter;
+
 template <class... OwnedTs, std::size_t... Slots>
 	requires(fl::monoid<std::remove_cvref_t<OwnedTs>> && ...) && (sizeof...(Slots) >= 1)
-class SharedCartesianMonoid<std::tuple<OwnedTs...>, Slots...> {
+class SharedCartesianMonoid<std::tuple<OwnedTs...>, Slots...> : public CartesianMonoidBase {
+   private:
 	using OwnedTuple = std::tuple<OwnedTs...>;
 
 	template <std::size_t I>
@@ -41,7 +60,10 @@ class SharedCartesianMonoid<std::tuple<OwnedTs...>, Slots...> {
 
 	OwnedTuple owned;
 
-	static constexpr std::size_t					   NumTapes = sizeof...(Slots);
+   public:
+	static constexpr std::size_t NumTapes = sizeof...(Slots);
+
+   private:
 	static constexpr std::array<std::size_t, NumTapes> slots{Slots...};
 
    public:
@@ -62,11 +84,11 @@ class SharedCartesianMonoid<std::tuple<OwnedTs...>, Slots...> {
    private:
 	template <std::size_t... Is>
 	constexpr auto mulImpl(auto a, auto b, std::index_sequence<Is...>) const {
-		return Value(std::get<slots[Is]>(owned).mul(std::get<Is>(a), std::get<Is>(b))...);
+		return std::tuple(std::get<slots[Is]>(owned).mul(std::get<Is>(a), std::get<Is>(b))...);
 	}
 	template <std::size_t... Is>
 	constexpr auto invMulImpl(auto a, auto b, std::index_sequence<Is...>) const {
-		return Value(std::get<slots[Is]>(owned).invMul(std::get<Is>(a), std::get<Is>(b))...);
+		return std::tuple(std::get<slots[Is]>(owned).invMul(std::get<Is>(a), std::get<Is>(b))...);
 	}
 	template <std::size_t... Is>
 	constexpr auto genImpl(auto a, std::index_sequence<Is...>) const {
@@ -83,8 +105,13 @@ class SharedCartesianMonoid<std::tuple<OwnedTs...>, Slots...> {
 		return seed;
 	}
 	template <std::size_t... Is>
-	constexpr Value ownImpl(const SharedCartesianMonoid &src, auto a, std::index_sequence<Is...>) const {
-		return Value(std::get<slots[Is]>(owned).own(std::get<slots[Is]>(src.owned), std::get<Is>(a))...);
+	constexpr auto ownImpl(const SharedCartesianMonoid &src, auto a, std::index_sequence<Is...>) const {
+		return std::tuple(std::get<slots[Is]>(owned).own(std::get<slots[Is]>(src.owned), std::get<Is>(a))...);
+	}
+
+	template <std::size_t... Is>
+	constexpr auto gcpImpl(auto a, auto b, std::index_sequence<Is...>) const {
+		return std::tuple(std::get<slots[Is]>(owned).gcp(std::get<Is>(a), std::get<Is>(b))...);
 	}
 
 	// const, matching InterningMonoid::compact() const: the owned monoids
@@ -105,6 +132,11 @@ class SharedCartesianMonoid<std::tuple<OwnedTs...>, Slots...> {
 		(compactTape<Is>(liveRanges...), ...);
 	}
 
+	template <std::size_t I>
+	constexpr const auto &getMonoid() const {
+		return std::get<slots[I]>(owned);
+	}
+
    public:
 	constexpr auto mul(auto a, auto b) const { return mulImpl(a, b, std::make_index_sequence<NumTapes>{}); }
 	constexpr auto invMul(auto a, auto b) const { return invMulImpl(a, b, std::make_index_sequence<NumTapes>{}); }
@@ -115,14 +147,11 @@ class SharedCartesianMonoid<std::tuple<OwnedTs...>, Slots...> {
 	/// copy a value from another (structurally identical) SharedCartesianMonoid's
 	/// tapes into this one's, tape by tape -- e.g. re-interning words produced by
 	/// a different InterningMonoid pool into this one's pool.
-	constexpr Value own(const SharedCartesianMonoid &src, auto a) const {
+	constexpr auto own(const SharedCartesianMonoid &src, auto a) const {
 		return ownImpl(src, a, std::make_index_sequence<NumTapes>{});
 	}
 
-	template <std::size_t I>
-	constexpr const auto &getMonoid() const {
-		return std::get<slots[I]>(owned);
-	}
+	constexpr auto gcp(auto a, auto b) const { return gcpImpl(a, b, std::make_index_sequence<NumTapes>{}); }
 
 	// tries to compact all owned monoids
 	template <std::ranges::input_range... Ranges>
@@ -130,6 +159,9 @@ class SharedCartesianMonoid<std::tuple<OwnedTs...>, Slots...> {
 	void compact(Ranges &&...liveRanges) const {
 		compactImpl(std::make_index_sequence<NumTapes>{}, liveRanges...);
 	}
+
+	CartesianMonoidElementPrinter<std::tuple<OwnedTs...>, Slots...> p(const Value &v) const
+		requires(fl::printable_monoid<OwnedTs> && ...);
 
 	// Serializes each physically-owned monoid instance exactly once (by
 	// `owned`, not by tape/slot -- two tapes sharing one instance via a
@@ -152,7 +184,39 @@ class SharedCartesianMonoid<std::tuple<OwnedTs...>, Slots...> {
 	explicit SharedCartesianMonoid(std::istream &in)
 		requires(fl::serializable_monoid<OwnedTs> && ...)
 		: owned{OwnedTs(in)...} {}
+
+	template <std::size_t I, cartesian_monoid C>
+	friend constexpr decltype(auto) get(C &&);
 };
+
+template <class OwnedTs, std::size_t... Slots>
+	requires(sizeof...(Slots) >= 1)
+struct CartesianMonoidElementPrinter {
+	const SharedCartesianMonoid<OwnedTs, Slots...>				   &m;
+	const typename SharedCartesianMonoid<OwnedTs, Slots...>::Value &v;
+};
+
+template <class... OwnedTs, std::size_t... Slots>
+	requires(fl::monoid<std::remove_cvref_t<OwnedTs>> && ...) &&
+			(sizeof...(Slots) >= 1)
+			CartesianMonoidElementPrinter<std::tuple<OwnedTs...>, Slots...> SharedCartesianMonoid<std::tuple<OwnedTs...>, Slots...>::p(
+				const typename SharedCartesianMonoid<std::tuple<OwnedTs...>, Slots...>::Value &v) const
+				requires(fl::printable_monoid<OwnedTs> && ...)
+{
+	return {*this, v};
+}
+
+template <class... OwnedTs, std::size_t... Slots>
+std::ostream &operator<<(std::ostream &out, const CartesianMonoidElementPrinter<std::tuple<OwnedTs...>, Slots...> &p)
+	requires(fl::printable_monoid<OwnedTs> && ...)
+{
+	out << "<";
+	[&]<std::size_t... Is>(std::index_sequence<Is...>) {
+		((out << (Is ? ", " : "") << print_if_can(get<Is>(p.m), std::get<Is>(p.v))), ...);
+	}(std::make_index_sequence<sizeof...(Slots)>{});
+	out << ">";
+	return out;
+}
 
 // Today's default: one independent monoid instance per tape, no sharing --
 // e.g. CartesianMonoid<InterningMonoid<char>, InterningMonoid<char>> owns two
@@ -175,7 +239,37 @@ using CartesianMonoid = typename detail::IdentitySlots<std::tuple<Ts...>, std::i
 template <class M>
 using DiagonalMonoid = SharedCartesianMonoid<std::tuple<M>, 0, 0>;
 
+template <std::size_t I, cartesian_monoid C>
+constexpr decltype(auto) get(C &&cartesian) {
+	return cartesian.template getMonoid<I>();
+}
+
+template <cartesian_monoid C>
+	requires(C::NumTapes >= 1)
+constexpr decltype(auto) in(C &&cartesian) {
+	return get<0>(std::forward<C>(cartesian));
+}
+template <cartesian_monoid C>
+	requires(C::NumTapes >= 2)
+constexpr decltype(auto) out(C &&cartesian) {
+	return get<1>(std::forward<C>(cartesian));
+}
+
 };	   // namespace fl
+
+template <class... OwnedTs, std::size_t... Slots>
+	requires(fl::monoid<std::remove_cvref_t<OwnedTs>> && ...) && (sizeof...(Slots) >= 1)
+struct std::formatter<fl::CartesianMonoidElementPrinter<std::tuple<OwnedTs...>, Slots...>, char> : fl::ostream_formatter {};
+
+template <class C>
+	requires std::derived_from<C, fl::CartesianMonoidBase>
+struct std::tuple_size<C> : std::integral_constant<std::size_t, C::NumTapes> {};
+
+template <std::size_t I, class C>
+	requires std::derived_from<C, fl::CartesianMonoidBase>
+struct std::tuple_element<I, C> {
+	using type = decltype(fl::get<I>(std::declval<C>()));
+};
 
 #include "IntegerMonoid.hpp"
 #include "InterningMonoid.hpp"
@@ -186,3 +280,5 @@ static_assert(fl::monoid<fl::DiagonalMonoid<fl::InterningMonoid<char>>>);
 
 /// cartesian product of free monoids is not itself a free monoid, because (a, Ɛ) and (Ɛ, a) commute
 static_assert(!fl::free_monoid<fl::CartesianMonoid<fl::IntegerMonoid<>, fl::IntegerMonoid<>, fl::IntegerMonoid<>>>);
+
+static_assert(fl::printable_monoid<fl::CartesianMonoid<fl::IntegerMonoid<>, fl::IntegerMonoid<>, fl::IntegerMonoid<>>>);

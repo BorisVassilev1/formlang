@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <cstdint>
 #include <istream>
 #include <ostream>
@@ -25,6 +26,24 @@ class IntegerMonoid {
 		return T(a);
 	}
 
+	constexpr Value from(range_of<Symbol> auto &&r) const { return std::ranges::distance(r); }
+	constexpr Value sub(Value a, std::size_t start, std::size_t len) const {
+		assert(start <= std::size_t(a) && start + len <= std::size_t(a));
+		return len;
+	}
+
+	constexpr std::size_t size(Value a) const { return a; }
+
+	constexpr Value gcp(Value a, Value b) const { return std::min(a, b); }
+
+	constexpr std::size_t C() const {
+		assert(false && "IntegerMonoid::C(): not implemented");
+		std::unreachable();
+		return 0;
+	}
+
+	constexpr Value p(Value a) const { return a; }
+
 	// IntegerMonoid holds no state of its own -- Value is self-contained, so
 	// there's nothing to write/read here. Exists only so IntegerMonoid
 	// composes under a CartesianMonoid alongside stateful tapes that do need
@@ -38,3 +57,4 @@ class IntegerMonoid {
 
 static_assert(fl::monoid<fl::IntegerMonoid<>>);
 static_assert(fl::free_monoid<fl::IntegerMonoid<>>);
+static_assert(fl::printable_monoid<fl::IntegerMonoid<>>);

@@ -2,14 +2,14 @@
 
 #include "CartesianMonoid.hpp"
 #include "SymbolMonoid.hpp"
-#include "concepts.hpp"
 #include "pipes.hpp"
+#include "transducer_concepts.hpp"
 #include "utils.h"
 
 namespace fl {
 
 template <symbol Symbol, std::size_t alphabetSize = Symbol::size, monoid M = InterningMonoid<Symbol>>
-class TotalSSFT {
+class TotalSSFST {
    public:
 	constexpr static bool		 deterministic = true;
 	constexpr static bool		 sorted_arcs   = true;
@@ -22,14 +22,14 @@ class TotalSSFT {
 
 	using OutValue = typename OutputMonoid::Value;
 
-	struct Transition {
+	struct Trans {
 		OutValue outputID;
 		State	 next;
-		bool	 operator==(const Transition &other) const	= default;
-		bool	 operator!=(const Transition &other) const	= default;
-		bool	 operator<=>(const Transition &other) const = default;
+		bool	 operator==(const Trans &other) const  = default;
+		bool	 operator!=(const Trans &other) const  = default;
+		bool	 operator<=>(const Trans &other) const = default;
 	};
-	using Map	   = std::vector<std::array<Transition, alphabetSize>>;
+	using Map	   = std::vector<std::array<Trans, alphabetSize>>;
 	using Letter_t = Symbol;
 
    protected:
@@ -43,20 +43,20 @@ class TotalSSFT {
 	OutValue			  initialOut = OutputMonoid::identity;
 
    public:
-	TotalSSFT() = default;
+	TotalSSFST() = default;
 
-	TotalSSFT(const TotalSSFT &) = default;
-	TotalSSFT(TotalSSFT &&)		 = default;
+	TotalSSFST(const TotalSSFST &) = default;
+	TotalSSFST(TotalSSFST &&)	   = default;
 
-	TotalSSFT &operator=(const TotalSSFT &) = default;
-	TotalSSFT &operator=(TotalSSFT &&)		= default;
+	TotalSSFST &operator=(const TotalSSFST &) = default;
+	TotalSSFST &operator=(TotalSSFST &&)	  = default;
 
 	[[clang::always_inline]] inline constexpr std::size_t size() const { return N; }
 	[[clang::always_inline]] inline constexpr std::size_t cacheCount() const {
-		return monoid.template getMonoid<1>().totalWordCount();		// this is not guaranteed to work
+		return get<1>(monoid).totalWordCount();		// this is not guaranteed to work
 	}
 	[[clang::always_inline]] inline constexpr std::size_t cacheSize() const {
-		return monoid.template getMonoid<1>().poolByteCount();	   // this is not guaranteed to work
+		return get<1>(monoid).poolByteCount();	   // this is not guaranteed to work
 	}
 
 	//[[clang::always_inline]] inline std::pair<std::span<const Symbol>, bool> step(State &state, Symbol letter) const {
@@ -91,8 +91,17 @@ class TotalSSFT {
 				   return std::make_tuple(typename Monoid::Value(letter, transition.outputID), transition.next);
 			   });
 	}
-	[[clang::always_inline]] inline auto Transitions(State state, Symbol letter) const {
+	[[clang::always_inline]] inline auto Transition(State state, Symbol letter) const {
 		return transitions[state][size_t(letter)];
+	}
+
+	[[clang::always_inline]] inline auto Transitions() const {
+		return std::views::iota(0u, N * alphabetSize) | std::views::transform([this](std::size_t i) {
+				   State  s						= i / alphabetSize;
+				   Symbol l						= Symbol(i % alphabetSize);
+				   const auto &[outputID, next] = transitions[s][size_t(l)];
+				   return std::tuple(s, typename Monoid::Value{l, outputID}, next);
+			   });
 	}
 	const Monoid &GetMonoid() const { return monoid; }
 
@@ -110,23 +119,23 @@ class TotalSSFT {
 	}
 
 	/// The same as the other overload, but in some sense
-	///	f(input) | monoid.getMonoid<1>().gen()
+	///	f(input) | get<1>(monoid).gen()
 	void f(range_of<Symbol> auto input, std::vector<Symbol> &outputWord) const
 		requires(!std::same_as<Symbol, OutValue>)	  // would clash
 	{
 		State state = 0;
 		outputWord.clear();
 		//
-		const auto &initial_out = monoid.template getMonoid<1>().gen(initialOut);
+		const auto &initial_out = get<1>(monoid).gen(initialOut);
 		outputWord.insert(outputWord.end(), initial_out.begin(), initial_out.end());
 
 		for (const auto &letter : input) {
 			const auto &[outputID, next] = transitions[state][size_t(letter)];
 			state						 = next;
-			const auto &out				 = monoid.template getMonoid<1>().gen(outputID);
+			const auto &out				 = get<1>(monoid).gen(outputID);
 			outputWord.insert(outputWord.end(), out.begin(), out.end());
 		}
-		const auto &final_out = monoid.template getMonoid<1>().gen(output[state]);
+		const auto &final_out = get<1>(monoid).gen(output[state]);
 		outputWord.insert(outputWord.end(), final_out.begin(), final_out.end());
 	}
 
@@ -136,7 +145,7 @@ class TotalSSFT {
 		return outputWord;
 	}
 
-	const TotalSSFT &serialize(std::ostream &out) const {
+	const TotalSSFST &serialize(std::ostream &out) const {
 		out.write(reinterpret_cast<const char *>(&N), sizeof(N));
 		monoid.serialize(out);
 		out.write(reinterpret_cast<const char *>(transitions.data()), transitions.size() * sizeof(transitions[0]));
@@ -144,7 +153,7 @@ class TotalSSFT {
 		return *this;
 	}
 
-	TotalSSFT(std::istream &in) {
+	TotalSSFST(std::istream &in) {
 		in.read(reinterpret_cast<char *>(&N), sizeof(N));
 		monoid = Monoid(in);
 		transitions.resize(N);
@@ -153,18 +162,16 @@ class TotalSSFT {
 		in.read(reinterpret_cast<char *>(output.data()), output.size() * sizeof(output[0]));
 	}
 
-	const TotalSSFT &print(std::ostream &out) const {
+	const TotalSSFST &print(std::ostream &out) const {
 		out << "digraph ReplaceWithMarkerSSFT {\n";
 		out << "  rankdir=LR;\n";
 		out << "  node [shape=circle];\n";
 		out << "  init [label=\"N=" << N << "\", shape=square];\n";
 		out << "  init -> 0;\n";	 // initial state
 		for (State s = 0; s < N; ++s) {
-			if (!monoid.template getMonoid<1>().equal(output[s], OutputMonoid::identity)) {
+			if (!get<1>(monoid).equal(output[s], OutputMonoid::identity)) {
 				out << "  " << s << " [shape=doublecircle, label=\"";
-				if constexpr (OStreamable<OutValue>) out << output[s];
-				else out << "unprintable";
-
+				out << print_if_can(get<1>(monoid), output[s]);
 				out << "\"];\n";								 // final States with output
 			} else out << "  " << s << " [shape=circle];\n";	 // final States
 
@@ -172,8 +179,7 @@ class TotalSSFT {
 				const auto &[outputID, next] = transitions[s][size_t(l)];
 				if (next != -1u) {
 					out << "  " << s << " -> " << next << " [label=\"<" << l << ", ";
-					if constexpr (OStreamable<OutValue>) out << outputID;
-					else out << "unprintable";
+					out << print_if_can(get<1>(monoid), outputID);
 					out << ">\"];\n";
 				}
 			}
@@ -184,19 +190,7 @@ class TotalSSFT {
 };
 
 template <class Symbol, size_t alphabetSize>
-void drawFSA(const TotalSSFT<Symbol, alphabetSize> &fsa) {
-	ShellProcess p("dot -Tsvg > a.svg && feh ./a.svg");
-	fsa.print(p.in());
-	p.in() << std::endl;
-	p.in().close();
-	p.wait();
-	auto out = getString(p.out()), err = getString(p.err());
-	if (!out.empty()) std::cout << out << std::endl;
-	if (!err.empty()) std::cout << err << std::endl;
-}
-
-template <class Symbol, size_t alphabetSize>
-void statFSA(const TotalSSFT<Symbol, alphabetSize> &fsa) {
+void statFSA(const TotalSSFST<Symbol, alphabetSize> &fsa) {
 	std::cout << "Subsequential Transtuder : |Q| = " << fsa.size() << ", |Σ| = " << alphabetSize
 			  << ", |Δ| = " << fsa.size() * alphabetSize << ", |strings| = " << fsa.cacheCount()
 			  << ", total = " << fsa.cacheSize() << std::endl;
@@ -215,14 +209,14 @@ bool isCanonical(const Transducer &t) {
 		gcp.clear();
 		bool haveCandidate = t.IsFinal(s);
 		if (haveCandidate) {
-			const auto &out = monoid.template getMonoid<1>().gen(t.Psi(s));
+			const auto &out = get<1>(monoid).gen(t.Psi(s));
 			gcp.insert(gcp.end(), out.begin(), out.end());
 		}
 
 		for (const auto &[letter, to] : t.Transitions(s)) {
 			if (haveCandidate && gcp.empty()) break;
 			const auto &[a, b] = letter;
-			const auto &out	   = monoid.template getMonoid<1>().gen(b);
+			const auto &out	   = get<1>(monoid).gen(b);
 			if (!haveCandidate) {
 				gcp.insert(gcp.end(), out.begin(), out.end());
 				haveCandidate = true;
@@ -242,4 +236,5 @@ bool isCanonical(const Transducer &t) {
 }	  // namespace fl
 
 #include "letter.hpp"
-static_assert(fl::SSFSTI<fl::TotalSSFT<fl::Letter>>, "TotalSSFT does not satisfy the subsequential transducer concept");
+static_assert(fl::SSFSTI<fl::TotalSSFST<fl::Letter>>,
+			  "TotalSSFT does not satisfy the subsequential transducer concept");

@@ -19,17 +19,17 @@ namespace fl {
 //
 // the transducer is total, so every state has transitions with each letter.
 template <fl::symbol Symbol, size_t alphabetSize = Symbol::size>
-class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize, InterningMonoid<Symbol>> {
+class ReplaceWithMarkerSSFT : public TotalSSFST<Symbol, alphabetSize, InterningMonoid<Symbol>> {
 	// this code relies heavily on the fact that InterningMonoid::Value can be compared trivially
-   public:
-	using State		   = unsigned int;
-	using Base		   = TotalSSFT<Symbol, alphabetSize, InterningMonoid<Symbol>>;
-	using Map		   = Base::Map;
-	using Transition   = Base::Transition;
-	using InputMonoid  = Base::InputMonoid;
-	using OutputMonoid = Base::OutputMonoid;
+	using Base	= TotalSSFST<Symbol, alphabetSize, InterningMonoid<Symbol>>;
+	using Map	= Base::Map;
+	using Trans = Base::Trans;
 
-	using OutValue = typename OutputMonoid::Value;
+	using OutputMonoid = get_output_t<Base>;
+	using OutValue	   = OutputMonoid::Value;
+
+   public:
+	using State = Base::State;
 
 	/// @brief A rule _<left>_<right>_ -> _<left><right>_
 	struct Rule {
@@ -47,7 +47,7 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize, InterningMo
 			match.push_back(marker);
 			match.insert(match.end(), rule.right.begin(), rule.right.end());
 			match.push_back(marker);
-			rightHalfID = words.create(std::span{match.begin() + markerIndex, match.end()});
+			rightHalfID = words.from(std::span{match.begin() + markerIndex, match.end()});
 		}
 		auto size() const { return match.size() - 1; }
 
@@ -60,18 +60,16 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize, InterningMo
 
 		auto output(const OutputMonoid &m, size_t offset) const {
 			// assert(offset < match.size());
-			if (offset < markerIndex) return m.create(std::span<const Symbol>{&match[offset], 1});
+			if (offset < markerIndex) return m.from(std::span<const Symbol>{&match[offset], 1});
 			else return OutputMonoid::identity;
 		}
-		auto color(const OutputMonoid &m) const {
-			return m.create(std::span<const Symbol>{match.begin() + markerIndex + 1, match.end()});
-		}
+		auto color(const OutputMonoid &m) const { return m.sub(rightHalfID, 1, match.size() - markerIndex - 1); }
 
 		/// words must be the same as the one used to construct the RuleMetadata
 		OutValue delay(InterningMonoid<Symbol> &words, size_t offset) const {
 			if (offset < markerIndex) return OutputMonoid::identity;
 			int		 len	= std::max(0, (int)(offset - markerIndex));
-			OutValue result = words.createInfix(rightHalfID, 0, len);
+			OutValue result = words.sub(rightHalfID, 0, len);
 			return result;
 		}
 	};
@@ -80,26 +78,26 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize, InterningMo
 	const Symbol marker;
 	bool		 minimize = true;
 
-	using TotalSSFT<Symbol, alphabetSize>::N;
-	using TotalSSFT<Symbol, alphabetSize>::transitions;
-	using TotalSSFT<Symbol, alphabetSize>::output;
-	using TotalSSFT<Symbol, alphabetSize>::monoid;
+	using TotalSSFST<Symbol, alphabetSize>::N;
+	using TotalSSFST<Symbol, alphabetSize>::transitions;
+	using TotalSSFST<Symbol, alphabetSize>::output;
+	using TotalSSFST<Symbol, alphabetSize>::monoid;
 
 	struct TemporaryStateData {
-		OutValue							 color;
-		std::array<Transition, alphabetSize> transitions;
-		auto								&operator[](size_t index) { return transitions[index]; }
-		auto								 operator[](size_t index) const { return transitions[index]; }
-		auto								 begin() { return transitions.begin(); }
-		auto								 end() { return transitions.end(); }
+		OutValue						color;
+		std::array<Trans, alphabetSize> transitions;
+		auto						   &operator[](size_t index) { return transitions[index]; }
+		auto							operator[](size_t index) const { return transitions[index]; }
+		auto							begin() { return transitions.begin(); }
+		auto							end() { return transitions.end(); }
 	};
 
 	struct StateDataView {
-		OutValue									color;
-		const std::array<Transition, alphabetSize> *transitions;
+		OutValue							   color;
+		const std::array<Trans, alphabetSize> *transitions;
 
 		constexpr StateDataView(const TemporaryStateData &s) noexcept : color(s.color), transitions(&s.transitions) {}
-		constexpr StateDataView(OutValue c, const std::array<Transition, alphabetSize> &t) noexcept
+		constexpr StateDataView(OutValue c, const std::array<Trans, alphabetSize> &t) noexcept
 			: color(c), transitions(&t) {}
 	};
 
@@ -111,14 +109,14 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize, InterningMo
 			size_t h = 0;
 			hash_combine(h, monHash(s.color));
 			// !!!hashes the bytes
-			hash_combine(h, fl::hash<std::array<Transition, alphabetSize>>()((s.transitions)));
+			hash_combine(h, fl::hash<std::array<Trans, alphabetSize>>()((s.transitions)));
 			return h;
 		}
 		constexpr size_t operator()(const StateDataView &s) const {
 			size_t h = 0;
 			hash_combine(h, monHash(s.color));
 			// !!!hashes the bytes
-			hash_combine(h, fl::hash<std::array<Transition, alphabetSize>>()(*s.transitions));
+			hash_combine(h, fl::hash<std::array<Trans, alphabetSize>>()(*s.transitions));
 			return h;
 		}
 	};
@@ -175,8 +173,7 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize, InterningMo
 		for (Symbol l = 0; l < Symbol::size; ++l) {
 			if (l == marker) continue;
 			// self-loop for all letters except marker
-			transitions[initial][size_t(l)] = {monoid.template getMonoid<1>().create(std::span<const Symbol>{&l, 1}),
-											   initial};
+			transitions[initial][size_t(l)] = {get<1>(monoid).from(std::span<const Symbol>{&l, 1}), initial};
 		}
 		std::vector<State> fail(N, -1u);
 		fail[initial]	= initial;
@@ -210,7 +207,7 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize, InterningMo
 					int						cutoff	   = delayTo.size();
 					failOutput.insert(failOutput.end(), delayState.begin(), delayState.end() - std::max(0, cutoff - 1));
 					if (cutoff <= 0) failOutput.push_back(l);
-					transitions[state][size_t(l)].outputID = monoid.template getMonoid<1>().create(failOutput);
+					transitions[state][size_t(l)].outputID = get<1>(monoid).from(failOutput);
 				}
 			}
 		}
@@ -252,7 +249,7 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize, InterningMo
 			if (offset < prevRuleMeta.size()) {		// the deepest state has no spine successor
 				auto &[outputID, next] = newData.transitions[size_t(prevRuleMeta.match[offset])];
 				next				   = prevState;
-				outputID			   = tempData.prevRuleMeta->output(monoid.template getMonoid<1>(), offset);
+				outputID			   = tempData.prevRuleMeta->output(get<1>(monoid), offset);
 			}
 
 			State state;
@@ -273,7 +270,7 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize, InterningMo
 		if (until >= 0) {
 			auto &[outputID, next] = tempData.unminimizedStates.back().transitions[size_t(prevRuleMeta.match[until])];
 			next				   = prevState;
-			outputID			   = tempData.prevRuleMeta->output(monoid.template getMonoid<1>(), until);
+			outputID			   = tempData.prevRuleMeta->output(get<1>(monoid), until);
 		}
 
 		assert(tempData.unminimizedStates.size() == (size_t)until + 1);
@@ -284,10 +281,9 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize, InterningMo
 		: marker(marker), minimize(minimize) {
 		// build a trie of the left parts of the rules
 
-		typename OutputMonoid::Value markerAsValue =
-			monoid.template getMonoid<1>().create(std::span<const Symbol>{&marker, 1});
+		typename OutputMonoid::Value markerAsValue = get<1>(monoid).from(std::span<const Symbol>{&marker, 1});
 
-		TemporaryData tempData(monoid.template getMonoid<1>());
+		TemporaryData tempData(get<1>(monoid));
 
 		State initial = newState();
 		tempData.delays.push_back(OutputMonoid::identity);
@@ -335,7 +331,7 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize, InterningMo
 				if (i > 1 && ruleMeta.match[i - 1] == marker) { output[state] = markerAsValue; }
 				state = next;
 			}
-			output[state]					   = ruleMeta.color(monoid.template getMonoid<1>());
+			output[state]					   = ruleMeta.color(get<1>(monoid));
 			transitions[state][size_t(marker)] = {output[state], trieStart};
 		}
 
@@ -362,7 +358,7 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize, InterningMo
 		out << "  node [shape=circle];\n";
 		out << "  init [label=\"N=" << N << "\", shape=square];\n";
 		out << "  init -> 0;\n";	 // initial state
-		auto &outMonoid = monoid.template getMonoid<1>();
+		auto &outMonoid = get<1>(monoid);
 		for (State s = 0; s < N; ++s) {
 			bool hasOutput = !outMonoid.equal(output[s], OutputMonoid::identity);
 			out << "  " << s << " [shape=" << (hasOutput ? "doublecircle" : "circle") << ", label=\"" << s << ": ";
@@ -384,8 +380,7 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize, InterningMo
 				const auto &[outputID, next] = transitions[s][size_t(l)];
 				if (next != -1u) {
 					out << "  " << s << " -> " << next << " [label=\"<" << l << ", ";
-					if constexpr (OStreamable<OutValue>) out << outputID;
-					else out << "unprintable";
+					out << print_if_can(outMonoid, outputID);
 					out << ">\"];\n";
 				}
 			}
@@ -397,8 +392,7 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize, InterningMo
 				const auto &[outputID, next] = tempData.unminimizedStates[s][size_t(l)];
 				if (next != -1u) {
 					out << "  " << N + s << " -> " << (next < N ? next : N + next - N) << " [label=\"<" << l << ", ";
-					if constexpr (OStreamable<OutValue>) out << outputID;
-					else out << "unprintable";
+					out << print_if_can(tempData.words, outputID);
 					out << ">\"];\n";
 				}
 			}
@@ -407,8 +401,7 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize, InterningMo
 				out << "  " << N + s << " -> " << (N + s + 1) << " [label=\"<" << tempData.prevRuleMeta->match[s]
 					<< ", ";
 				OutValue outputID = tempData.prevRuleMeta->output(tempData.words, s);
-				if constexpr (OStreamable<OutValue>) out << outputID;
-				else out << "unprintable";
+				out << print_if_can(tempData.words, outputID);
 				out << ">\", style=dashed];\n";
 			}
 		}
@@ -416,7 +409,7 @@ class ReplaceWithMarkerSSFT : public TotalSSFT<Symbol, alphabetSize, InterningMo
 	}
 
 	ReplaceWithMarkerSSFT(std::istream &in, const Symbol &marker)
-		: fl::TotalSSFT<Symbol, alphabetSize>(in), marker(marker) {}
+		: fl::TotalSSFST<Symbol, alphabetSize>(in), marker(marker) {}
 
 	ReplaceWithMarkerSSFT(const ReplaceWithMarkerSSFT &)			= default;
 	ReplaceWithMarkerSSFT(ReplaceWithMarkerSSFT &&)					= default;

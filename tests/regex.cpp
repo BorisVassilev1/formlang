@@ -85,22 +85,22 @@ int main(int argc, char **argv) {
 	std::cout << "FSA has " << fst.N << " states and " << fst.transitions.size() << " transitions and "
 			  << fst.wordCount() << " words after trimming." << std::endl;
 
-	ExpandedFST<KleeneMonoid<Letter>> efst;
-	BENCH(efst = expandFST<Letter>(std::move(fst));, 1, "BENCH expandFST: ");
+	ExpandedFST<Letter, InterningMonoid<Letter>> efst;
+	BENCH(efst = expandFST(std::move(fst));, 1, "BENCH expandFST: ");
 	if (tokens.size() < 1000) drawFSA(efst);
-	std::cout << "Expanded FSA has " << efst.N << " states and " << efst.transitions.size() << " transitions and "
-			  << efst.words.size() << " words." << std::endl;
+	std::cout << "Expanded FSA has " << efst.N << " states and " << efst.transitions.size() << " transitions."
+			  << std::endl;
 
 	if (!infAmbiguity) {
 		BENCH(efst = removeUpperEpsilonFST<Letter>(std::move(efst));, 1, "BENCH realtimeFST: ");
 		if (tokens.size() < 1000) drawFSA(efst);
-		std::cout << "Real-time FSA has " << efst.N << " states and " << efst.transitions.size() << " transitions and "
-				  << efst.words.size() << " words." << std::endl;
+		std::cout << "Real-time FSA has " << efst.N << " states and " << efst.transitions.size() << " transitions."
+				  << std::endl;
 
 		BENCH(efst = trimFSA<Letter>(std::move(efst));, 1, "BENCH trimFSA again: ");
 		if (tokens.size() < 1000) drawFSA(efst);
-		std::cout << "Trimmed FSA has " << efst.N << " states and " << efst.transitions.size() << " transitions and "
-				  << efst.words.size() << " words." << std::endl;
+		std::cout << "Trimmed FSA has " << efst.N << " states and " << efst.transitions.size() << " transitions."
+				  << std::endl;
 		bool isFunc = isFunctional(efst);
 		std::cout << "isFunctional: " << isFunc << std::endl;
 

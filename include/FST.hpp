@@ -15,6 +15,7 @@
 #include "regexParser.hpp"
 #include "CartesianMonoid.hpp"
 #include "InterningMonoid.hpp"
+#include "transducer_concepts.hpp"
 
 namespace fl {
 
@@ -58,12 +59,6 @@ class SparseFST {
 	explicit constexpr SparseFST(Monoid &&m) : N(0), monoid(std::move(m)) {}
 	explicit constexpr SparseFST(const Monoid &m) : N(0), monoid(m) {}
 
-	// void addTransition(State from, std::vector<Symbol> &&w1, std::vector<Symbol> &&w2, State to) {
-	//	auto v1 = monoid.template getMonoid<0>().create(std::span<const Symbol>(w1.data(), w1.size()));
-	//	auto v2 = monoid.template getMonoid<1>().create(std::span<const Symbol>(w2.data(), w2.size()));
-	//	transitions.insert({from, {Value(v1, v2), to}});
-	// }
-
 	void addTransition(State from, const Value &label, State to) { transitions.insert({from, {std::move(label), to}}); }
 	void addTransition(State from, const I::Value &in, const M::Value &out, State to) {
 		transitions.insert({from, {{std::move(in), std::move(out)}, to}});
@@ -75,18 +70,19 @@ class SparseFST {
 	/// combining two automata into a union/concatenation).
 	Value reintern(const Monoid &src, const Value &v) {
 		auto [w1, w2] = src.gen(v);
-		return Value(monoid.template getMonoid<0>().create(w1), monoid.template getMonoid<1>().create(w2));
+		return Value(get<0>(monoid).from(w1), get<1>(monoid).from(w2));
 	}
 
 	/// whether the label is the identity of the I-th tape's monoid (i.e. that tape reads/writes epsilon)
 	template <std::size_t i>
 	bool isIdentityOnTape(const Value &v) const {
-		return monoid.template getMonoid<i>().equal(std::get<i>(v), std::get<i>(Monoid::identity));
+		return get<i>(monoid).equal(std::get<i>(v), std::get<i>(Monoid::identity));
 	}
 
 	/// total number of distinct words interned across both tapes' pools (diagnostic use only)
 	std::size_t wordCount() const {
-		return monoid.template getMonoid<0>().totalWordCount() + monoid.template getMonoid<1>().totalWordCount();
+		bool isDiagonal = &get<0>(monoid) == &get<1>(monoid);
+		return get<0>(monoid).totalWordCount() + (isDiagonal ? 0 : get<1>(monoid).totalWordCount());
 	}
 
 	void print(std::ostream &out) const {
@@ -124,6 +120,13 @@ class SparseFST {
 		auto [begin, end] = transitions.equal_range(q);
 		return std::ranges::subrange(begin, end) | std::views::values;
 	}
+
+	auto Transitions() const {
+		return transitions | std::views::transform([](const auto &pair) {
+				   const auto &[value, to] = pair.second;
+				   return std::make_tuple(pair.first, value, to);
+			   });
+	}
 	const Monoid &GetMonoid() const { return monoid; }
 };
 }	  // namespace fl
@@ -155,8 +158,8 @@ class BS_WordFSA : public BS_FSA<Symbol> {
 		this->N		  = 2;
 		this->qFirsts = {0};
 		this->qFinals = {1};
-		this->addTransition(*this->qFirsts.begin(), this->monoid.template getMonoid<0>().create(word1),
-							this->monoid.template getMonoid<1>().create(word2), 1);
+		this->addTransition(*this->qFirsts.begin(), get<0>(this->monoid).from(word1), get<1>(this->monoid).from(word2),
+							1);
 	}
 };
 
@@ -336,8 +339,8 @@ class TH_WordFSA : public StringFST<Symbol> {
 		this->N		  = 2;
 		this->qFirsts = {0};
 		this->qFinals = {1};
-		this->addTransition(*this->qFirsts.begin(), this->monoid.template getMonoid<0>().create(word1),
-							this->monoid.template getMonoid<1>().create(word2), 1);
+		this->addTransition(*this->qFirsts.begin(), get<0>(this->monoid).from(word1), get<1>(this->monoid).from(word2),
+							1);
 	}
 };
 
@@ -491,17 +494,6 @@ class StupidUnionFSA : public StringFST<Symbol> {
 		}
 	}
 };
-
-template <class Symbol>
-void drawFSA(const StringFST<Symbol> &fsa) {
-	ShellProcess p("dot -Tsvg > a.svg && feh ./a.svg");
-	fsa.print(p.in());
-	p.in() << std::endl;
-	p.in().close();
-	p.wait();
-	std::cout << getString(p.out()) << std::endl;
-	std::cout << getString(p.err()) << std::endl;
-}
 
 template <class Symbol>
 inline void saveFSA(const StringFST<Symbol> &fsa, const std::string &filename) {

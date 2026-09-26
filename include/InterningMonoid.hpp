@@ -7,8 +7,12 @@
 #include <memory>
 #include <unordered_set>
 #include <cstring>
+#include "formatting.hpp"
 
 namespace fl {
+
+template <class S>
+class InterningMonoidElementPrinter;
 
 /// S^* where the type S is a fl::symbol type.
 ///
@@ -31,6 +35,7 @@ class InterningMonoid {
 		// comparison is stateless
 		constexpr bool operator==(const WordId &other) const { return id == other.id; }
 		constexpr bool operator!=(const WordId &other) const { return id != other.id; }
+		constexpr auto operator<=>(const WordId &other) const { return id <=> other.id; }
 
 		friend class InterningMonoid<S>;
 	};
@@ -192,6 +197,14 @@ class InterningMonoid {
 		assert(isPrefix);
 	}
 
+	size_t gcp_len(std::span<const S> A, std::span<const S> B) const {
+		size_t len = 0;
+		while (len < A.size() && len < B.size() && A[len] == B[len]) {
+			++len;
+		}
+		return len;
+	}
+
    public:
 	using Value	 = WordId;
 	using Symbol = S;
@@ -272,35 +285,63 @@ class InterningMonoid {
 	std::span<const S> gen(const TemporaryId &a) const { return get(a); }
 	std::span<const S> gen(const InfixId &a) const { return get(a); }
 
-	Value own(const InterningMonoid &m, Value a) const { return addUnique(m.get(a)); }
+	std::size_t size(Value a) const { return storage->wordsData[a.id].length; }
+	std::size_t size(const TemporaryId &a) const { return a.length; }
+	std::size_t size(const InfixId &a) const { return a.length; }
 
-	// ---------------- methods down from here are not required by the concepts
+	// Value own(const InterningMonoid &m, Value a) const { return addUnique(m.get(a)); }
+	TemporaryId own(const InterningMonoid &m, Value a) const {
+		const auto &data = m.get(a);
+		storage->temporaries.insert(storage->temporaries.end(), data.begin(), data.end());
+		return {this, static_cast<uint32_t>(storage->temporaries.size() - data.size()),
+				static_cast<uint32_t>(data.size())};
+	}
 
 	template <std::ranges::viewable_range V>
-	Value create(V &&v) const {
+	Value from(V &&v) const {
 		return addUnique(v);
 	}
 
-	Value create(const char *v) const
-		requires std::same_as<char, S>
-	{
-		return addUnique(std::span<const char>(v, std::strlen(v)));
-	}
-
-	InfixId createInfix(Value a, std::size_t start, std::size_t length) const {
+	InfixId sub(Value a, std::size_t start, std::size_t length) const {
 		auto &[startA, lengthA] = storage->wordsData[a.id];
 		assert(start + length <= lengthA);
 		return {this, startA + static_cast<uint32_t>(start), static_cast<uint32_t>(length)};
 	}
 
-	InfixId createInfix(InfixId a, std::size_t start, std::size_t length) const {
+	InfixId sub(InfixId a, std::size_t start, std::size_t length) const {
 		assert(start + length <= a.length);
 		return {this, a.start + static_cast<uint32_t>(start), static_cast<uint32_t>(length)};
 	}
 
-	TemporaryId createInfix(TemporaryId a, std::size_t start, std::size_t length) const {
+	TemporaryId sub(TemporaryId a, std::size_t start, std::size_t length) const {
 		assert(start + length <= a.length);
 		return {this, a.start + static_cast<uint32_t>(start), static_cast<uint32_t>(length)};
+	}
+
+	auto gcp(auto a, auto b) const {
+		const auto &A	= get(a);
+		const auto &B	= get(b);
+		size_t		len = gcp_len(A, B);
+		return sub(a, 0, len);
+	}
+
+	std::size_t C() const {
+		std::size_t maxLength = 0;
+		for (const auto &[start, length] : storage->wordsData)
+			maxLength = std::max(maxLength, static_cast<std::size_t>(length));
+		return maxLength;
+	}
+
+	InterningMonoidElementPrinter<S> p(WordId id) const { return {this, get(id)}; }
+	InterningMonoidElementPrinter<S> p(const TemporaryId &id) const { return {this, get(id)}; }
+	InterningMonoidElementPrinter<S> p(const InfixId &id) const { return {this, get(id)}; }
+
+	// ---------------- methods down from here are not required by the concepts
+
+	Value from(const char *v) const
+		requires std::same_as<char, S>
+	{
+		return addUnique(std::span<const char>(v, std::strlen(v)));
 	}
 
 	uint32_t	temporaryCount() const { return storage->temporaryCount; }
@@ -524,7 +565,33 @@ bool InterningMonoid<S>::myEqual::operator()(const U &a, const V &b) const {
 	return std::distance(a.begin(), a.end()) == std::distance(b.begin(), b.end()) &&
 		   std::equal(a.begin(), a.end(), b.begin(), b.end());
 }
+
+template <class S>
+class InterningMonoidElementPrinter {
+	const InterningMonoid<S> *monoid;
+	const std::span<const S>  word;
+
+   public:
+	InterningMonoidElementPrinter(const InterningMonoid<S> *monoid, const std::span<const S> &word)
+		: monoid(monoid), word(word) {}
+	friend std::ostream &operator<<(std::ostream &os, const InterningMonoidElementPrinter &p) {
+		if constexpr (OStreamable<S>) {
+			for (const auto &c : p.word)
+				os << c;
+		} else {
+			os << "unprintable symbols";
+		}
+		return os;
+	}
+};
+
 };	   // namespace fl
 
+template <class S>
+struct std::formatter<fl::InterningMonoidElementPrinter<S>> : fl::ostream_formatter {};
+
+#include "letter.hpp"
 static_assert(fl::monoid<fl::InterningMonoid<char>>);
 static_assert(fl::free_monoid<fl::InterningMonoid<char>>);
+static_assert(fl::printable_monoid<fl::InterningMonoid<char>>);
+static_assert(fl::serializable_monoid<fl::InterningMonoid<fl::Letter>>);

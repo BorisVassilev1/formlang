@@ -1,15 +1,14 @@
 #include <cassert>
 #include <iostream>
-#include "KleeneMonoid.hpp"
 
 // int main() {
-//	fl::KleeneMonoid<char> sigma_star;
+//	fl::InterningMonoid<char> sigma_star;
 //	using Value = decltype(sigma_star)::Value;
 //
-//	Value v1 = sigma_star.create("asdf");
+//	Value v1 = sigma_star.from("asdf");
 //
-//	Value v2 = sigma_star.create("as");
-//	Value v3 = sigma_star.create("df");
+//	Value v2 = sigma_star.from("as");
+//	Value v3 = sigma_star.from("df");
 //	Value v4 = sigma_star.mul(v2, v3);
 //
 //	assert(sigma_star.equal(v1, v4));
@@ -31,7 +30,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "../doctest.h"
 
-#include "KleeneMonoid.hpp"
+#include "InterningMonoid.hpp"
 
 #include <array>
 #include <cstring>
@@ -42,7 +41,7 @@
 
 namespace {
 
-using M	 = fl::KleeneMonoid<char>;
+using M	 = fl::InterningMonoid<char>;
 using Id = M::Value;
 
 /// Copy a word out of the pool. Never hold a span across a create/mul call:
@@ -68,7 +67,7 @@ std::span<const char> bytes(const std::string &s) { return std::span<const char>
 // Construction and the identity element
 // ---------------------------------------------------------------------------
 
-TEST_SUITE("KleeneMonoid / identity") {
+TEST_SUITE("InterningMonoid / identity") {
 
 	TEST_CASE("a fresh monoid holds exactly the empty word") {
 		M m;
@@ -79,14 +78,14 @@ TEST_SUITE("KleeneMonoid / identity") {
 
 	TEST_CASE("the empty word interns to the identity") {
 		M m;
-		CHECK(m.equal(m.create(""), M::identity));
-		CHECK(m.equal(m.create(std::span<const char>{}), M::identity));
+		CHECK(m.equal(m.from(""), M::identity));
+		CHECK(m.equal(m.from(std::span<const char>{}), M::identity));
 		CHECK(m.totalWordCount() == 1);
 	}
 
 	TEST_CASE("identity is a two-sided unit") {
 		M  m;
-		Id a  = m.create("abc");
+		Id a  = m.from("abc");
 		Id la = m.mul(M::identity, a);
 		Id ra = m.mul(a, M::identity);
 		CHECK(m.equal(la, a));
@@ -99,13 +98,13 @@ TEST_SUITE("KleeneMonoid / identity") {
 // create / interning
 // ---------------------------------------------------------------------------
 
-TEST_SUITE("KleeneMonoid / create") {
+TEST_SUITE("InterningMonoid / create") {
 
 	TEST_CASE("equal words share an id, distinct words do not") {
 		M  m;
-		Id a1 = m.create("abc");
-		Id a2 = m.create("abc");
-		Id b  = m.create("abd");
+		Id a1 = m.from("abc");
+		Id a2 = m.from("abc");
+		Id b  = m.from("abd");
 
 		CHECK(m.equal(a1, a2));
 		CHECK_FALSE(m.equal(a1, b));
@@ -114,17 +113,17 @@ TEST_SUITE("KleeneMonoid / create") {
 
 	TEST_CASE("gen round-trips the word") {
 		M m;
-		CHECK(word(m, m.create("abc")) == "abc");
-		CHECK(word(m, m.create("x")) == "x");
-		CHECK(word(m, m.create("")).empty());
+		CHECK(word(m, m.from("abc")) == "abc");
+		CHECK(word(m, m.from("x")) == "x");
+		CHECK(word(m, m.from("")).empty());
 	}
 
 	TEST_CASE("prefixes and suffixes are separate words") {
 		M  m;
-		Id ab  = m.create("ab");
-		Id abc = m.create("abc");
-		Id bc  = m.create("bc");
-		Id a   = m.create("a");
+		Id ab  = m.from("ab");
+		Id abc = m.from("abc");
+		Id bc  = m.from("bc");
+		Id a   = m.from("a");
 
 		CHECK_FALSE(m.equal(ab, abc));
 		CHECK_FALSE(m.equal(bc, abc));
@@ -136,15 +135,15 @@ TEST_SUITE("KleeneMonoid / create") {
 
 	TEST_CASE("the const char* overload stops at the NUL terminator") {
 		M m;
-		CHECK(m.gen(m.create("abc")).size() == 3);
+		CHECK(m.gen(m.from("abc")).size() == 3);
 	}
 
 	TEST_CASE("the range overload keeps embedded NULs") {
 		M		   m;
 		const char raw[] = {'a', '\0', 'b'};
-		Id		   a	 = m.create(std::span<const char>(raw, 3));
+		Id		   a	 = m.from(std::span<const char>(raw, 3));
 		CHECK(m.gen(a).size() == 3);
-		CHECK_FALSE(m.equal(a, m.create("a")));
+		CHECK_FALSE(m.equal(a, m.from("a")));
 	}
 
 	TEST_CASE("accepts contiguous ranges other than span") {
@@ -152,8 +151,8 @@ TEST_SUITE("KleeneMonoid / create") {
 		const std::string s = "hello";
 		std::vector<char> v = {'h', 'e', 'l', 'l', 'o'};
 
-		Id from_string = m.create(bytes(s));
-		Id from_vector = m.create(std::span<const char>(v.data(), v.size()));
+		Id from_string = m.from(bytes(s));
+		Id from_vector = m.from(std::span<const char>(v.data(), v.size()));
 		CHECK(m.equal(from_string, from_vector));
 		CHECK(word(m, from_string) == "hello");
 	}
@@ -163,13 +162,13 @@ TEST_SUITE("KleeneMonoid / create") {
 // hash
 // ---------------------------------------------------------------------------
 
-TEST_SUITE("KleeneMonoid / hash") {
+TEST_SUITE("InterningMonoid / hash") {
 
 	TEST_CASE("hash is stable for equal ids") {
 		M  m;
-		Id a1 = m.create("abc");
-		Id a2 = m.create("abc");
-		Id b  = m.create("abd");
+		Id a1 = m.from("abc");
+		Id a2 = m.from("abc");
+		Id b  = m.from("abd");
 		CHECK(m.hash(a1) == m.hash(a2));
 		CHECK(m.hash(a1) != m.hash(b));
 	}
@@ -184,12 +183,12 @@ TEST_SUITE("KleeneMonoid / hash") {
 // mul
 // ---------------------------------------------------------------------------
 
-TEST_SUITE("KleeneMonoid / mul") {
+TEST_SUITE("InterningMonoid / mul") {
 
 	TEST_CASE("mul concatenates") {
 		M  m;
-		Id a  = m.create("abc");
-		Id b  = m.create("def");
+		Id a  = m.from("abc");
+		Id b  = m.from("def");
 		Id ab = m.mul(a, b);
 		CHECK(word(m, ab) == "abcdef");
 		CHECK(word(m, Id(m.mul(b, a))) == "defabc");
@@ -199,20 +198,20 @@ TEST_SUITE("KleeneMonoid / mul") {
 	// check on Storage::get(const TemporaryId&).
 	TEST_CASE("equal reads a temporary's own contents") {
 		M  m;
-		Id a = m.create("ab");
-		Id b = m.create("cd");
+		Id a = m.from("ab");
+		Id b = m.from("cd");
 
 		CHECK(m.equal(m.mul(a, b), m.mul(a, b)));
 		CHECK_FALSE(m.equal(m.mul(a, b), m.mul(b, a)));
-		CHECK(m.equal(m.create("abcd"), m.mul(a, b)));
-		CHECK_FALSE(m.equal(m.create("abce"), m.mul(a, b)));
+		CHECK(m.equal(m.from("abcd"), m.mul(a, b)));
+		CHECK_FALSE(m.equal(m.from("abce"), m.mul(a, b)));
 	}
 
 	TEST_CASE("mul is associative") {
 		M  m;
-		Id a = m.create("ab");
-		Id b = m.create("cd");
-		Id c = m.create("ef");
+		Id a = m.from("ab");
+		Id b = m.from("cd");
+		Id c = m.from("ef");
 
 		Id left	 = m.mul(Id(m.mul(a, b)), c);
 		Id right = m.mul(a, Id(m.mul(b, c)));
@@ -222,9 +221,9 @@ TEST_SUITE("KleeneMonoid / mul") {
 
 	TEST_CASE("a product interns to the pre-existing word") {
 		M  m;
-		Id a	  = m.create("abc");
-		Id b	  = m.create("def");
-		Id abcdef = m.create("abcdef");
+		Id a	  = m.from("abc");
+		Id b	  = m.from("def");
+		Id abcdef = m.from("abcdef");
 
 		uint32_t before = m.totalWordCount();
 		Id		 prod	= m.mul(a, b);
@@ -234,8 +233,8 @@ TEST_SUITE("KleeneMonoid / mul") {
 
 	TEST_CASE("a new product adds exactly one word") {
 		M		 m;
-		Id		 a		= m.create("abc");
-		Id		 b		= m.create("def");
+		Id		 a		= m.from("abc");
+		Id		 b		= m.from("def");
 		uint32_t before = m.totalWordCount();
 		Id		 prod	= m.mul(a, b);
 		CHECK(m.totalWordCount() == before + 1);
@@ -244,9 +243,9 @@ TEST_SUITE("KleeneMonoid / mul") {
 
 	TEST_CASE("mul accepts temporary operands") {
 		M  m;
-		Id a = m.create("ab");
-		Id b = m.create("cd");
-		Id c = m.create("ef");
+		Id a = m.from("ab");
+		Id b = m.from("cd");
+		Id c = m.from("ef");
 
 		CHECK(word(m, Id(m.mul(m.mul(a, b), c))) == "abcdef");
 		CHECK(word(m, Id(m.mul(a, m.mul(b, c)))) == "abcdef");
@@ -259,8 +258,8 @@ TEST_SUITE("KleeneMonoid / mul") {
 	TEST_CASE("mul of two temporaries survives scratch-buffer growth") {
 		M				  m;
 		const std::string big(4096, 'q');
-		Id				  a = m.create(bytes(big));
-		Id				  b = m.create("tail");
+		Id				  a = m.from(bytes(big));
+		Id				  b = m.from("tail");
 
 		for (int i = 0; i < 8; ++i) {
 			CAPTURE(i);
@@ -273,7 +272,7 @@ TEST_SUITE("KleeneMonoid / mul") {
 
 	TEST_CASE("mul is idempotent on repeated products") {
 		M  m;
-		Id a  = m.create("xy");
+		Id a  = m.from("xy");
 		Id p1 = m.mul(a, a);
 		Id p2 = m.mul(a, a);
 		CHECK(m.equal(p1, p2));
@@ -285,22 +284,22 @@ TEST_SUITE("KleeneMonoid / mul") {
 // invMul
 // ---------------------------------------------------------------------------
 
-TEST_SUITE("KleeneMonoid / invMul") {
+TEST_SUITE("InterningMonoid / invMul") {
 
 	TEST_CASE("invMul(Value, Value) strips the prefix") {
 		M  m;
-		Id a	  = m.create("abc");
-		Id abcdef = m.create("abcdef");
+		Id a	  = m.from("abc");
+		Id abcdef = m.from("abcdef");
 		Id suffix = m.invMul(a, abcdef);
 		CHECK(word(m, suffix) == "def");
-		CHECK(m.equal(suffix, m.create("def")));
+		CHECK(m.equal(suffix, m.from("def")));
 	}
 
 	TEST_CASE("an infix that is already interned does not get a second id") {
 		M		 m;
-		Id		 a		= m.create("abc");
-		Id		 abcdef = m.create("abcdef");
-		Id		 def	= m.create("def");
+		Id		 a		= m.from("abc");
+		Id		 abcdef = m.from("abcdef");
+		Id		 def	= m.from("def");
 		uint32_t before = m.totalWordCount();
 		Id		 suffix = m.invMul(a, abcdef);
 		CHECK(m.equal(suffix, def));
@@ -309,17 +308,17 @@ TEST_SUITE("KleeneMonoid / invMul") {
 
 	TEST_CASE("invMul(TemporaryId, Value)") {
 		M  m;
-		Id a	  = m.create("abc");
-		Id b	  = m.create("de");
-		Id abcdef = m.create("abcdef");
+		Id a	  = m.from("abc");
+		Id b	  = m.from("de");
+		Id abcdef = m.from("abcdef");
 		Id rest	  = m.invMul(m.mul(a, b), abcdef);
 		CHECK(word(m, rest) == "f");
 	}
 
 	TEST_CASE("invMul(Value, TemporaryId) strips the prefix") {
 		M  m;
-		Id a = m.create("abc");
-		Id b = m.create("def");
+		Id a = m.from("abc");
+		Id b = m.from("def");
 
 		Id suffix = m.invMul(a, m.mul(a, b));
 		CHECK(word(m, suffix) == "def");
@@ -328,9 +327,9 @@ TEST_SUITE("KleeneMonoid / invMul") {
 
 	TEST_CASE("invMul(TemporaryId, TemporaryId) strips the prefix") {
 		M  m;
-		Id a = m.create("ab");
-		Id b = m.create("cd");
-		Id c = m.create("ef");
+		Id a = m.from("ab");
+		Id b = m.from("cd");
+		Id c = m.from("ef");
 
 		// (ab.cd)^-1 . (ab.cd.ef) == ef
 		Id rest = m.invMul(m.mul(a, b), m.mul(Id(m.mul(a, b)), c));
@@ -339,24 +338,24 @@ TEST_SUITE("KleeneMonoid / invMul") {
 
 	TEST_CASE("invMul by the identity is a no-op") {
 		M  m;
-		Id a	 = m.create("abc");
-		Id b	 = m.create("d");
+		Id a	 = m.from("abc");
+		Id b	 = m.from("d");
 		Id whole = m.invMul(M::identity, m.mul(a, b));
 		CHECK(word(m, whole) == "abcd");
 	}
 
 	TEST_CASE("invMul by the whole word yields the identity") {
 		M  m;
-		Id a	 = m.create("abc");
-		Id b	 = m.create("def");
+		Id a	 = m.from("abc");
+		Id b	 = m.from("def");
 		Id empty = m.invMul(Id(m.mul(a, b)), m.mul(a, b));
 		CHECK(m.equal(empty, M::identity));
 	}
 
 	TEST_CASE("mul then invMul round-trips") {
 		M  m;
-		Id a = m.create("prefix");
-		Id b = m.create("suffix");
+		Id a = m.from("prefix");
+		Id b = m.from("suffix");
 		CHECK(m.equal(Id(m.invMul(a, m.mul(a, b))), b));
 	}
 }
@@ -371,12 +370,12 @@ TEST_SUITE("KleeneMonoid / invMul") {
 // the volatile temporaries buffer.
 // ---------------------------------------------------------------------------
 
-TEST_SUITE("KleeneMonoid / InfixId") {
+TEST_SUITE("InterningMonoid / InfixId") {
 
 	TEST_CASE("gen(InfixId) reads a middle infix without interning it") {
 		M		 m;
-		Id		 whole	= m.create("abcdef");
-		Id		 ab		= m.create("ab");
+		Id		 whole	= m.from("abcdef");
+		Id		 ab		= m.from("ab");
 		uint32_t before = m.totalWordCount();
 
 		auto cdef = m.invMul(ab, whole);	 // InfixId "cdef"
@@ -386,21 +385,21 @@ TEST_SUITE("KleeneMonoid / InfixId") {
 
 	TEST_CASE("invMul(Value, InfixId) strips further off an existing infix") {
 		M  m;
-		Id whole = m.create("abcdef");
-		Id ab	 = m.create("ab");
-		Id cd	 = m.create("cd");
+		Id whole = m.from("abcdef");
+		Id ab	 = m.from("ab");
+		Id cd	 = m.from("cd");
 
 		auto cdef = m.invMul(ab, whole);	 // InfixId "cdef"
 		auto ef	  = m.invMul(cd, cdef);		 // invMul(Value, InfixId) -> InfixId "ef"
 		CHECK(peek(m, ef) == "ef");
-		CHECK(m.equal(Id(ef), m.create("ef")));
+		CHECK(m.equal(Id(ef), m.from("ef")));
 	}
 
 	TEST_CASE("invMul(InfixId, Value) strips a prefix that is itself an infix") {
 		M  m;
-		Id whole  = m.create("abcdef");
-		Id a	  = m.create("a");
-		Id whole2 = m.create("bcdefij");
+		Id whole  = m.from("abcdef");
+		Id a	  = m.from("a");
+		Id whole2 = m.from("bcdefij");
 
 		auto bcdef = m.invMul(a, whole);		 // InfixId "bcdef"
 		auto ij	   = m.invMul(bcdef, whole2);	 // invMul(InfixId, Value) -> InfixId "ij"
@@ -409,9 +408,9 @@ TEST_SUITE("KleeneMonoid / InfixId") {
 
 	TEST_CASE("invMul(InfixId, InfixId) strips a prefix infix from another infix") {
 		M  m;
-		Id abcd = m.create("abcd");
-		Id ab	= m.create("ab");
-		Id cdxy = m.create("cdxy");
+		Id abcd = m.from("abcd");
+		Id ab	= m.from("ab");
+		Id cdxy = m.from("cdxy");
 
 		auto cd	  = m.invMul(ab, abcd);				 // InfixId "cd"
 		auto full = m.invMul(M::identity, cdxy);		 // InfixId "cdxy" (the whole word, as an InfixId)
@@ -421,10 +420,10 @@ TEST_SUITE("KleeneMonoid / InfixId") {
 
 	TEST_CASE("invMul(TemporaryId, InfixId) strips a temporary prefix from an infix") {
 		M  m;
-		Id abcdef = m.create("abcdef");
-		Id ab	  = m.create("ab");
-		Id c	  = m.create("c");
-		Id d	  = m.create("d");
+		Id abcdef = m.from("abcdef");
+		Id ab	  = m.from("ab");
+		Id c	  = m.from("c");
+		Id d	  = m.from("d");
 
 		auto cdef = m.invMul(ab, abcdef);	  // InfixId "cdef"
 		auto cd	  = m.mul(c, d);			  // TemporaryId "cd"
@@ -434,10 +433,10 @@ TEST_SUITE("KleeneMonoid / InfixId") {
 
 	TEST_CASE("invMul(InfixId, TemporaryId) yields a TemporaryId, not an InfixId") {
 		M  m;
-		Id abcdef = m.create("abcdef");
-		Id ab	  = m.create("ab");
-		Id e	  = m.create("e");
-		Id f	  = m.create("f");
+		Id abcdef = m.from("abcdef");
+		Id ab	  = m.from("ab");
+		Id e	  = m.from("e");
+		Id f	  = m.from("f");
 
 		auto cdef = m.invMul(ab, abcdef);	  // InfixId "cdef"
 		auto ef	  = m.mul(e, f);			  // TemporaryId "ef" (1 live temporary)
@@ -451,9 +450,9 @@ TEST_SUITE("KleeneMonoid / InfixId") {
 
 	TEST_CASE("mul accepts InfixId operands in every position") {
 		M  m;
-		Id abcd = m.create("abcd");
-		Id ab	= m.create("ab");
-		Id ef	= m.create("ef");
+		Id abcd = m.from("abcd");
+		Id ab	= m.from("ab");
+		Id ef	= m.from("ef");
 
 		auto cd = m.invMul(ab, abcd);	  // InfixId "cd"
 
@@ -466,13 +465,13 @@ TEST_SUITE("KleeneMonoid / InfixId") {
 
 	TEST_CASE("equal compares InfixId against Value, TemporaryId, and InfixId") {
 		M  m;
-		Id abcd = m.create("abcd");
-		Id ab	= m.create("ab");
-		Id cd	= m.create("cd");
-		Id xy	= m.create("xy");
+		Id abcd = m.from("abcd");
+		Id ab	= m.from("ab");
+		Id cd	= m.from("cd");
+		Id xy	= m.from("xy");
 
 		auto cdInfix = m.invMul(ab, abcd);	   // InfixId "cd"
-		auto cdTemp	 = m.mul(m.create("c"), m.create("d"));	// TemporaryId "cd"
+		auto cdTemp	 = m.mul(m.from("c"), m.from("d"));	// TemporaryId "cd"
 
 		CHECK(m.equal(cd, cdInfix));
 		CHECK(m.equal(cdInfix, cd));
@@ -482,16 +481,16 @@ TEST_SUITE("KleeneMonoid / InfixId") {
 		CHECK(m.equal(cdTemp, cdInfix));
 		CHECK(m.equal(cdInfix, cdTemp));
 
-		auto cdInfix2 = m.invMul(m.create("x"), m.create("xcd"));	  // another InfixId "cd"
+		auto cdInfix2 = m.invMul(m.from("x"), m.from("xcd"));	  // another InfixId "cd"
 		CHECK(m.equal(cdInfix, cdInfix2));
-		CHECK_FALSE(m.equal(cdInfix, m.invMul(m.create("x"), m.create("xxy"))));
+		CHECK_FALSE(m.equal(cdInfix, m.invMul(m.from("x"), m.from("xxy"))));
 	}
 
 	TEST_CASE("converting an InfixId interns it, sharing storage with an equal Value") {
 		M		 m;
-		Id		 abcd = m.create("abcd");
-		Id		 ab	  = m.create("ab");
-		Id		 cd	  = m.create("cd");
+		Id		 abcd = m.from("abcd");
+		Id		 ab	  = m.from("ab");
+		Id		 cd	  = m.from("cd");
 		uint32_t before = m.totalWordCount();
 
 		auto cdInfix  = m.invMul(ab, abcd);	 // content "cd" already exists as `cd`
@@ -499,8 +498,8 @@ TEST_SUITE("KleeneMonoid / InfixId") {
 		CHECK(m.equal(interned, cd));
 		CHECK(m.totalWordCount() == before);	 // no new entry: "cd" was already interned
 
-		Id q = m.create("q");
-		Id qz = m.create("qz");
+		Id q = m.from("q");
+		Id qz = m.from("qz");
 		before = m.totalWordCount();
 
 		auto infixZ		 = m.invMul(q, qz);	   // InfixId "z", content never interned before
@@ -520,12 +519,12 @@ TEST_SUITE("KleeneMonoid / InfixId") {
 // count alone because neither side dies.
 // ---------------------------------------------------------------------------
 
-TEST_SUITE("KleeneMonoid / temporaries") {
+TEST_SUITE("InterningMonoid / temporaries") {
 
 	TEST_CASE("temporaryCount tracks live temporaries") {
 		M  m;
-		Id a = m.create("ab");
-		Id b = m.create("cd");
+		Id a = m.from("ab");
+		Id b = m.from("cd");
 
 		CHECK(m.temporaryCount() == 0);
 		{
@@ -545,8 +544,8 @@ TEST_SUITE("KleeneMonoid / temporaries") {
 
 	TEST_CASE("copying and moving a temporary each take a reference") {
 		M  m;
-		Id a = m.create("ab");
-		Id b = m.create("cd");
+		Id a = m.from("ab");
+		Id b = m.from("cd");
 
 		{
 			auto t1 = m.mul(a, b);
@@ -563,8 +562,8 @@ TEST_SUITE("KleeneMonoid / temporaries") {
 
 	TEST_CASE("assignment does not change the count") {
 		M  m;
-		Id a = m.create("ab");
-		Id b = m.create("cd");
+		Id a = m.from("ab");
+		Id b = m.from("cd");
 
 		auto t1 = m.mul(a, b);
 		auto t2 = m.mul(b, a);
@@ -579,8 +578,8 @@ TEST_SUITE("KleeneMonoid / temporaries") {
 
 	TEST_CASE("a temporary can be converted to a Value more than once") {
 		M  m;
-		Id a = m.create("ab");
-		Id b = m.create("cd");
+		Id a = m.from("ab");
+		Id b = m.from("cd");
 
 		auto t	 = m.mul(a, b);
 		Id	 id1 = t;
@@ -590,8 +589,8 @@ TEST_SUITE("KleeneMonoid / temporaries") {
 
 	TEST_CASE("converting a temporary interns it") {
 		M		 m;
-		Id		 a		= m.create("ab");
-		Id		 b		= m.create("cd");
+		Id		 a		= m.from("ab");
+		Id		 b		= m.from("cd");
 		uint32_t before = m.totalWordCount();
 		{
 			auto t = m.mul(a, b);
@@ -604,8 +603,8 @@ TEST_SUITE("KleeneMonoid / temporaries") {
 
 	TEST_CASE("comparing against a temporary does not intern it") {
 		M		 m;
-		Id		 a		= m.create("ab");
-		Id		 b		= m.create("cd");
+		Id		 a		= m.from("ab");
+		Id		 b		= m.from("cd");
 		uint32_t before = m.totalWordCount();
 		CHECK_FALSE(m.equal(a, m.mul(a, b)));
 		CHECK(m.totalWordCount() == before);
@@ -616,7 +615,7 @@ TEST_SUITE("KleeneMonoid / temporaries") {
 // Scale / reallocation
 // ---------------------------------------------------------------------------
 
-TEST_SUITE("KleeneMonoid / scale") {
+TEST_SUITE("InterningMonoid / scale") {
 
 	TEST_CASE("ids stay valid across storage reallocation") {
 		M						 m;
@@ -625,7 +624,7 @@ TEST_SUITE("KleeneMonoid / scale") {
 
 		for (int i = 0; i < 500; ++i) {
 			expected.push_back("w" + std::to_string(i) + "|" + std::string(i % 17, 'x'));
-			ids.push_back(m.create(bytes(expected.back())));
+			ids.push_back(m.from(bytes(expected.back())));
 		}
 
 		REQUIRE(m.totalWordCount() == 501);
@@ -633,7 +632,7 @@ TEST_SUITE("KleeneMonoid / scale") {
 		for (std::size_t i = 0; i < ids.size(); ++i) {
 			CAPTURE(i);
 			CHECK(word(m, ids[i]) == expected[i]);
-			CHECK(m.equal(ids[i], m.create(bytes(expected[i]))));
+			CHECK(m.equal(ids[i], m.from(bytes(expected[i]))));
 		}
 		CHECK(m.totalWordCount() == 501);	 // nothing was added on re-create
 	}
@@ -643,7 +642,7 @@ TEST_SUITE("KleeneMonoid / scale") {
 		Id			acc = M::identity;
 		std::string expected;
 		for (int i = 0; i < 64; ++i) {
-			Id piece = m.create("ab");
+			Id piece = m.from("ab");
 			acc		 = m.mul(acc, piece);
 			expected += "ab";
 		}
@@ -655,18 +654,18 @@ TEST_SUITE("KleeneMonoid / scale") {
 // Other symbol types
 // ---------------------------------------------------------------------------
 
-TEST_SUITE("KleeneMonoid / symbol types") {
+TEST_SUITE("InterningMonoid / symbol types") {
 
 	TEST_CASE("works over char32_t") {
-		using M32 = fl::KleeneMonoid<char32_t>;
+		using M32 = fl::InterningMonoid<char32_t>;
 		M32 m;
 
 		std::array<char32_t, 3> abc{U'\u03b1', U'\u03b2', U'\u03b3'};
 		std::array<char32_t, 3> abd{U'\u03b1', U'\u03b2', U'\u03b4'};
 
-		auto x = m.create(std::span<const char32_t>(abc));
-		auto y = m.create(std::span<const char32_t>(abc));
-		auto z = m.create(std::span<const char32_t>(abd));
+		auto x = m.from(std::span<const char32_t>(abc));
+		auto y = m.from(std::span<const char32_t>(abc));
+		auto z = m.from(std::span<const char32_t>(abd));
 
 		CHECK(m.equal(x, y));
 		CHECK_FALSE(m.equal(x, z));
@@ -677,25 +676,25 @@ TEST_SUITE("KleeneMonoid / symbol types") {
 	}
 
 	TEST_CASE("char32_t words are not confused with their byte encodings") {
-		using M32 = fl::KleeneMonoid<char32_t>;
+		using M32 = fl::InterningMonoid<char32_t>;
 		M32 m;
 
 		std::array<char32_t, 1> one{U'\u0041'};
 		std::array<char32_t, 2> two{U'\u0041', U'\u0000'};
-		auto					a = m.create(std::span<const char32_t>(one));
-		auto					b = m.create(std::span<const char32_t>(two));
+		auto					a = m.from(std::span<const char32_t>(one));
+		auto					b = m.from(std::span<const char32_t>(two));
 		CHECK_FALSE(m.equal(a, b));
 		CHECK(m.totalWordCount() == 3);
 	}
 
 	TEST_CASE("mul over char32_t") {
-		using M32 = fl::KleeneMonoid<char32_t>;
+		using M32 = fl::InterningMonoid<char32_t>;
 		M32 m;
 
 		std::array<char32_t, 2> ab{U'\u03b1', U'\u03b2'};
 		std::array<char32_t, 2> cd{U'\u03b3', U'\u03b4'};
-		auto					x = m.create(std::span<const char32_t>(ab));
-		auto					y = m.create(std::span<const char32_t>(cd));
+		auto					x = m.from(std::span<const char32_t>(ab));
+		auto					y = m.from(std::span<const char32_t>(cd));
 		auto					p = M32::Value(m.mul(x, y));
 		REQUIRE(m.gen(p).size() == 4);
 		CHECK(m.gen(p)[0] == U'\u03b1');
@@ -707,19 +706,19 @@ TEST_SUITE("KleeneMonoid / symbol types") {
 // Known issues - see KNOWN_ISSUES.md
 // ---------------------------------------------------------------------------
 
-TEST_SUITE("KleeneMonoid / known issues") {
+TEST_SUITE("InterningMonoid / known issues") {
 
 	// #2 compile error: checkPrefix streams S to std::cerr, and
 	// operator<<(ostream&, char32_t) is deleted in C++20. Same for char16_t,
 	// char8_t, and any symbol type without an operator<<.
 	TEST_CASE("invMul works over char32_t") {
-		using M32 = fl::KleeneMonoid<char32_t>;
+		using M32 = fl::InterningMonoid<char32_t>;
 		M32 m;
 
 		std::array<char32_t, 2> ab{U'\u03b1', U'\u03b2'};
 		std::array<char32_t, 4> abcd{U'\u03b1', U'\u03b2', U'\u03b3', U'\u03b4'};
-		auto					x = m.create(std::span<const char32_t>(ab));
-		auto					y = m.create(std::span<const char32_t>(abcd));
+		auto					x = m.from(std::span<const char32_t>(ab));
+		auto					y = m.from(std::span<const char32_t>(abcd));
 
 		auto rest = M32::Value(m.invMul(x, y));
 		REQUIRE(m.gen(rest).size() == 2);
@@ -732,8 +731,8 @@ TEST_SUITE("KleeneMonoid / known issues") {
 	// live.
 	TEST_CASE("the temporaries buffer is reclaimed when the count hits zero") {
 		M  m;
-		Id a = m.create("ab");
-		Id b = m.create("cd");
+		Id a = m.from("ab");
+		Id b = m.from("cd");
 
 		uint32_t first = 0, second = 0;
 		{

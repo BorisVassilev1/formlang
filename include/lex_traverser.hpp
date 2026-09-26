@@ -8,6 +8,7 @@
 #include <map>
 
 #include <concepts.hpp>
+#include "transducer_concepts.hpp"
 
 namespace fl {
 template <symbol Symbol>
@@ -83,11 +84,21 @@ static_assert(std::ranges::input_range<fl::CharInputStream<fl::Letter>>);
 
 namespace fl {
 
-template <SSFST T, std::ranges::input_range Range>
-	requires(!SSFSTI<T> && std::convertible_to<std::ranges::range_value_t<Range>, typename T::Letter_t>)
+/// A view that takes a range of input symbols and produces a range of output tokens
+/// The input range must be a range of symbols that are convertible to the input symbol type of the SSFST
+/// The output range is a range of tokens that are produced by the SSFST
+///
+/// Note: Let the function of the transducer be f: Σ* -> Γ*
+/// This view will represent the function f*: Σ* -> (Γ* ∪ {error}) where 'error' is special
+/// Handles only single-letter-output transducers, i.e. the output of the final states should be a single symbol
+template <SSFST_traversable T, std::ranges::input_range Range>
+	requires(!SSFSTI<T> &&	   //
+			 std::convertible_to<std::ranges::range_value_t<Range>, typename get_input_t<T>::Symbol>)
 class LexerRange : public std::ranges::view_interface<LexerRange<T, Range>> {
-	using State	 = typename T::State;
-	using Symbol = typename T::Letter_t;
+	using State		   = T::State;
+	using InputSymbol  = get_input_t<T>::Symbol;
+	using OutputValue  = get_output_t<T>::Value;
+	using OutputSymbol = get_output_t<T>::Symbol;
 
 	using This = LexerRange<T, Range>;
 
@@ -95,25 +106,26 @@ class LexerRange : public std::ranges::view_interface<LexerRange<T, Range>> {
 	using InnerIterator = decltype(std::ranges::begin(std::declval<Range &>()));
 	using InnerSentinel = decltype(std::ranges::end(std::declval<Range &>()));
 
-	Range	*range;
-	const T &ssft;
-	Symbol	 error_token;
+	Range		*range;
+	const T		&ssft;
+	OutputSymbol error_token;
 
-	LexerRange(Range &range, const T &ssft, Symbol error_token) : range(&range), ssft(ssft), error_token(error_token) {}
+	LexerRange(Range &range, const T &ssft, OutputSymbol error_token)
+		: range(&range), ssft(ssft), error_token(error_token) {}
 
 	class iterator {
-	   public:
-		InnerIterator		current;
-		InnerSentinel		end;
-		State				current_state;
-		This			   *lex_ptr;
-		std::size_t			position;
-		std::size_t			output_position;
-		std::size_t			line_number = 1;
-		mutable bool		consumed	= false;
-		std::vector<Symbol> buffer;
-		mutable Symbol		queued_token = Symbol::eps;
+		InnerIterator			  current;
+		InnerSentinel			  end;
+		State					  current_state;
+		This					 *lex_ptr;
+		std::size_t				  position;
+		std::size_t				  output_position;
+		std::size_t				  line_number = 1;
+		mutable bool			  consumed	  = false;
+		std::vector<OutputSymbol> buffer;
+		mutable OutputSymbol	  queued_token = OutputSymbol::eps;
 
+	   public:
 		iterator(InnerIterator &&begin, InnerSentinel &&end, This *lex_ptr)
 			: current(std::move(begin)),
 			  end(std::move(end)),
@@ -134,11 +146,14 @@ class LexerRange : public std::ranges::view_interface<LexerRange<T, Range>> {
 			consumed		= current == end;
 			buffer.clear();
 			while (current != end) {
-				auto [output, success] = ssft_ptr->step(current_state, *current);
-				if (!success) {
-					if (ssft_ptr->isFinal(current_state)) {
-						Symbol output = ssft_ptr->psi(current_state)[0];
-						auto   it	  = lex_ptr->skippers.find(output);
+				// auto [output, success] = ssft_ptr->step(current_state, *current);
+				auto result = ssft_ptr->Transition(current_state, *current);
+				if (!result) {
+					if (ssft_ptr->IsFinal(current_state)) {
+						OutputValue	 output_value = ssft_ptr->Psi(current_state);
+						const auto	&output_range = get<1>(ssft_ptr->GetMonoid()).gen(output_value);
+						OutputSymbol output		  = *output_range.begin();
+						auto		 it			  = lex_ptr->skippers.find(output);
 						if (it != lex_ptr->skippers.end()) {
 							auto skipper  = it->second;
 							auto [len, t] = skipper(*this);
@@ -153,9 +168,11 @@ class LexerRange : public std::ranges::view_interface<LexerRange<T, Range>> {
 					++position;
 					++current;
 
-					current_state = ssft_ptr->initial();
+					current_state = *ssft_ptr->Initial().begin();
 					return *this;
 				}
+				auto [output, next] = *result;
+				current_state		= next;
 				if (*current == '\n') ++line_number;
 				buffer.push_back(*current);
 				++current;
@@ -165,23 +182,28 @@ class LexerRange : public std::ranges::view_interface<LexerRange<T, Range>> {
 		}
 
 		struct TokenData {
-			Symbol					token;
-			std::size_t				from;
-			std::size_t				to;
-			std::size_t				line;
-			std::span<const Symbol> str;
+			/// The output token produced by the lexer
+			OutputSymbol token;
+			/// The position in the input stream where the token starts
+			std::size_t from;
+			/// The position in the input stream where the token ends (exclusive)
+			std::size_t					 to;
+			std::size_t					 line;	   /// The line number of the token in the input stream
+			std::span<const InputSymbol> str;	   /// The span of input symbols that produced this token
 		};
 
 		TokenData operator*() const {
 			consumed = true;
-			if (queued_token != Symbol::eps) {
+			if (queued_token != OutputSymbol::eps) {
 				auto t		 = queued_token;
-				queued_token = Symbol::eps;
+				queued_token = OutputSymbol::eps;
 				return TokenData{t, output_position, position - 1, line_number,
 								 std::span(buffer.begin(), buffer.end())};
 			}
-			if (lex_ptr->ssft.isFinal(current_state)) {
-				return TokenData{lex_ptr->ssft.psi(current_state)[0], output_position, position - 1, line_number,
+			if (lex_ptr->ssft.IsFinal(current_state)) {
+				const auto &output_value = lex_ptr->ssft.Psi(current_state);
+				const auto &output_range = get<1>(lex_ptr->ssft.GetMonoid()).gen(output_value);
+				return TokenData{*output_range.begin(), output_position, position - 1, line_number,
 								 std::span(buffer.begin(), buffer.end())};
 			} else {
 				return TokenData{lex_ptr->error_token, output_position, position - 1, line_number,
@@ -189,9 +211,9 @@ class LexerRange : public std::ranges::view_interface<LexerRange<T, Range>> {
 			}
 		}
 	};
-	using SkipperFunction = std::function<std::tuple<size_t, Symbol>(iterator &it)>;
-	std::map<Symbol, SkipperFunction> skippers;
-	void attachSkipper(Symbol token, SkipperFunction skipper) { skippers[token] = skipper; }
+	using SkipperFunction = std::function<std::tuple<size_t, OutputSymbol>(iterator &it)>;
+	std::map<OutputSymbol, SkipperFunction> skippers;
+	void attachSkipper(OutputSymbol token, SkipperFunction skipper) { skippers[token] = skipper; }
 
 	iterator begin() { return iterator(std::ranges::begin(*range), std::ranges::end(*range), this); }
 	auto	 end() { return std::ranges::end(*range); };

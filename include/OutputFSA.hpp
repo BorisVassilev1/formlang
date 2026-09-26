@@ -28,15 +28,15 @@ class OutputFSA {
 		*this		  = OutputFSA<Symbol>(pseudoDeterminizeFST(std::move(realtime)), fixedOutput);
 	}
 
-	OutputFSA(ExpandedFST<InterningMonoid<Symbol>> &&tfsa, Symbol fixedOutput) {
+	OutputFSA(ExpandedFST<Symbol, InterningMonoid<Symbol>> &&tfsa, Symbol fixedOutput) {
 		this->N		  = tfsa.N;
-		this->qFinals = std::move(tfsa.qFinals);
-		this->qFirsts = std::move(tfsa.qFirsts);
-		for (const auto &[from, rhs] : tfsa.transitions) {
-			const auto &[letter, outputID, to] = rhs;
-			if (!tfsa.words.getWord(outputID).empty())
+		this->qFinals = std::move(tfsa.Final());
+		this->qFirsts = std::move(tfsa.Initial());
+		for (const auto &[from, value, to] : tfsa.Transitions()) {
+			const auto &[letter, output] = value;
+			if (get<1>(tfsa.GetMonoid()).size(output) != 0)
 				throw std::runtime_error("OutputFSA can only have epsilon on second tape");
-			this->transitions.emplace(from, std::make_tuple(letter, to));
+			this->transitions.emplace(from, std::tuple{letter, to});
 		}
 
 		for (const auto &final : this->qFinals) {
@@ -53,7 +53,7 @@ class OutputFSA {
 			const auto &[outputID, to] = rhs;
 			if (!ssft.words.getWord(outputID).empty())
 				throw std::runtime_error("OutputFSA can only have epsilon on second tape");
-			this->transitions.emplace(from, std::make_tuple(letter, to));
+			this->transitions.emplace(from, std::tuple{letter, to});
 		}
 
 		for (const auto &final : this->qFinals) {
@@ -105,14 +105,15 @@ class OutputFSA {
 						auto   it		  = ssft.output.find(new_id);
 						Symbol out_letter = this->output.at(s);
 						if (it != ssft.output.end()) {	   // aka winningState is not -1
-							Symbol old_letter = ssft.words.getWord(it->second)[0];
+							Symbol old_letter =
+								*get<1>(ssft.GetMonoid()).gen(it->second).begin();	   // single letter output
 							if (old_letter != out_letter) {
 								// dbLog(dbg::LOG_DEBUG, "OutputFSA::determinizeToSSFT: conflict at state ", new_id,
 								//	  " between outputs ", old_letter, " and ", out_letter);
 
 								if (s < winningState) {
 									// dbLog(dbg::LOG_DEBUG, "OutputFSA::determinizeToSSFT: keeping ", out_letter);
-									ssft.output[new_id] = ssft.words.addWord(std::array<Symbol, 1>{out_letter});
+									ssft.output[new_id] = get<1>(ssft.GetMonoid()).from(std::span{&out_letter, 1});
 									winningState		= s;
 								} else {
 									// dbLog(dbg::LOG_DEBUG, "OutputFSA::determinizeToSSFT: keeping ", old_letter);
@@ -120,7 +121,7 @@ class OutputFSA {
 							}
 						} else {
 							ssft.qFinals.insert(new_id);
-							ssft.output[new_id] = ssft.words.addWord(std::array<Symbol, 1>{out_letter});
+							ssft.output[new_id] = get<1>(ssft.GetMonoid()).from(std::span<Symbol>{&out_letter, 1});
 							winningState		= s;
 						}
 					}
@@ -153,7 +154,8 @@ class OutputFSA {
 
 			for (const auto &[letter, next_bs] : current_transitions) {
 				auto [next_state, is_new] = getStateID(BigState(next_bs));
-				ssft.transitions.emplace(std::make_tuple(current, letter), std::make_pair(0, next_state));
+				ssft.transitions.emplace(std::make_tuple(current, letter),
+										 std::make_pair(get<1>(ssft.GetMonoid()).identity, next_state));
 				if (is_new) { queue.push(next_state); }
 			}
 		}
@@ -196,15 +198,4 @@ class UnionOutputFSA : public OutputFSA<Symbol> {
 	}
 };
 
-template <class Symbol>
-void drawFSA(const OutputFSA<Symbol> &fsa) {
-	ShellProcess p("dot -Tsvg > a.svg && feh ./a.svg");
-	fsa.print(p.in());
-	p.in() << std::endl;
-	p.in().close();
-	p.wait();
-	auto out = getString(p.out()), err = getString(p.err());
-	if (!out.empty()) std::cout << out << std::endl;
-	if (!err.empty()) std::cout << err << std::endl;
-}
 }	  // namespace fl

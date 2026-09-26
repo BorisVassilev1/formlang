@@ -49,30 +49,27 @@ bool balancible(T &&t) {
 	return balancible(std::get<0>(t), std::get<1>(t));
 }
 
+template <free_monoid M>
+bool balancible(const M &m, auto u, auto v) {
+	return m.size(u) == 0 || m.size(v) == 0;
+}
+
 template <class U, class V>
 bool eq(U &&u, V &&v) {
-	if (u.size() != v.size()) return false;
-	for (const auto &[a, b] : std::views::zip(u, v)) {
-		if (a != b) return false;
-	}
-	return true;
+	return std::equal(std::begin(u), std::end(u), std::begin(v), std::end(v));
 }
 
 /// expects trimmed real-time FST
-template <free_monoid M>
-bool isFunctional(const ExpandedFST<M> &fst) {
+template <symbol S, free_monoid M>
+bool isFunctional(const ExpandedFST<S, M> &fst) {
 	// create the squared putput transducer and compute Adm(q) for every state q in it;
 
-	using State	 = typename ExpandedFST<M>::State;
-	using Symbol = typename M::Symbol;
+	using State	  = typename ExpandedFST<S, M>::State;
+	using Symbol  = typename M::Symbol;
+	const auto &m = get<1>(fst.GetMonoid());
 
 	// check output of empty word
-	int eps_out = -1;
-	for (const auto &q : fst.f_eps) {
-		if (eps_out == -1) {
-			eps_out = q;
-		} else if (!std::ranges::equal(fst.words[q], fst.words[eps_out])) return false;
-	}
+	if (fst.f_eps.size() > 1) return false;
 
 	unordered_map<std::tuple<State, State>, std::tuple<std::vector<Symbol>, std::vector<Symbol>>> Adm;
 	std::queue<std::tuple<State, State>>														  queue;
@@ -81,8 +78,8 @@ bool isFunctional(const ExpandedFST<M> &fst) {
 	{
 		std::vector<std::vector<std::tuple<Symbol, State>>> reverseTransitions;
 		reverseTransitions.resize(fst.N);
-		for (const auto &[from, rhs] : fst.transitions) {
-			const auto &[l, _, to] = rhs;
+		for (const auto &[from, value, to] : fst.Transitions()) {
+			const auto &[l, _] = value;
 			reverseTransitions[to].emplace_back(l, from);	  // reverse transitions
 		}
 
@@ -128,16 +125,14 @@ bool isFunctional(const ExpandedFST<M> &fst) {
 	auto isFinal   = [&fst](State i, State j) { return fst.qFinals.contains(i) && fst.qFinals.contains(j); };
 
 	auto Delta = [&](State i, State j) {
-		auto [b1, e1] = fst.transitions.equal_range(i);
-		auto [b2, e2] = fst.transitions.equal_range(j);
-		auto r1		  = std::ranges::subrange(b1, e1);
-		auto r2		  = std::ranges::subrange(b2, e2);
+		auto r1 = fst.Transitions(i);
+		auto r2 = fst.Transitions(j);
 		return std::views::cartesian_product(r1, r2) | std::views::filter([&](const auto &pair) {
-				   const auto &[t1, t2]	   = pair;
-				   const auto &[_, value1] = t1;
-				   const auto &[_, value2] = t2;
-				   const auto &[a, _, to1] = value1;
-				   const auto &[b, _, to2] = value2;
+				   const auto &[t1, t2]		 = pair;
+				   const auto &[value1, to1] = t1;
+				   const auto &[value2, to2] = t2;
+				   const auto &[a, _]		 = value1;
+				   const auto &[b, _]		 = value2;
 				   return a == b && isCoFinal(to1, to2);	 // only consider transitions with the same letter
 			   });
 	};
@@ -159,30 +154,38 @@ bool isFunctional(const ExpandedFST<M> &fst) {
 		// std::cout << "\'" << u << "\',\'" << v << "\'" << std::endl;
 		auto Dq = Delta(q, h);
 		for (const auto &[t1, t2] : Dq) {
-			auto &[_, value1]  = t1;
-			auto &[_, value2]  = t2;
-			auto &[l1, id1, i] = value1;
-			auto &[l2, id2, j] = value2;
-			auto [h_1, h_2]	   = w_noref<Symbol>(u, v, fst.words[id1], fst.words[id2]);
+			auto &[value1, i] = t1;
+			auto &[value2, j] = t2;
+			auto &[l1, w1]	  = value1;
+			auto &[l2, w2]	  = value2;
+			auto u_			  = m.from(u);
+			auto v_			  = m.from(v);
+			auto uw1		  = m.mul(u_, w1);
+			auto vw2		  = m.mul(v_, w2);
+			auto gcp		  = m.gcp(uw1, vw2);
+			auto h_1		  = m.invMul(gcp, uw1);
+			auto h_2		  = m.invMul(gcp, vw2);
 
 			auto q2 = std::tuple(i, j);
 			//  functional(i+1) := ∀(q′, h′) ∈ Dq : (balancible(h′) ∧
 			// ((q′ ∈ F ) → (h′ = (ε, ε))) ∧ (! Adm(i)(q′) → (h′ = Adm(i)(q′))));
-			functional &= balancible(h_1, h_2);
-			functional &= !isFinal(i, j) || (h_1.empty() && h_2.empty());
+			functional &= balancible(m, h_1, h_2);
+			functional &= !isFinal(i, j) || (m.size(h_1) == 0 && m.size(h_2) == 0);
 			auto q2_it = Adm.find(q2);
-			functional &=
-				q2_it == Adm.end() || (eq(h_1, std::get<0>(q2_it->second)) && eq(h_2, std::get<1>(q2_it->second)));
+			functional &= q2_it == Adm.end() ||
+						  (eq(m.gen(h_1), std::get<0>(q2_it->second)) && eq(m.gen(h_2), std::get<1>(q2_it->second)));
+
+			auto tovector = [](const auto &x) { return std::vector(x.begin(), x.end()); };
 
 			if (functional) {
 				if (q2_it == Adm.end()) {
 					queue.push(q2);
-					Adm.insert({{i, j}, {toSymbol<Symbol>(h_1), toSymbol<Symbol>(h_2)}});
+					Adm.insert({{i, j}, {tovector(m.gen(h_1)), tovector(m.gen(h_2))}});
 				}
 			} else {
-				std::cout << "-> \"" << toString(h_1) << "\", \"" << toString(h_2) << "\"" << std::endl;
-				std::cout << "len: " << h_1.size() << " " << h_2.size() << std::endl;
-				std::cout << "balancible: " << balancible(h_1, h_2) << std::endl;
+				std::cout << "-> \"" << print_if_can(m, h_1) << "\", \"" << print_if_can(m, h_2) << "\"" << std::endl;
+				std::cout << "len: " << m.size(h_1) << " " << m.size(h_2) << std::endl;
+				std::cout << "balancible: " << balancible(m, h_1, h_2) << std::endl;
 				std::cout << "isFinal: " << isFinal(i, j) << std::endl;
 				std::cout << "Q = (" << q << ", " << h << ")" << std::endl;
 				std::cout << "q2 = (" << std::get<0>(q2) << ", " << std::get<1>(q2) << ")" << std::endl;
@@ -196,10 +199,9 @@ bool isFunctional(const ExpandedFST<M> &fst) {
 				}
 				std::cout << "cofinal(" << i << ", " << j << ") = " << isCoFinal(i, j) << std::endl;
 				std::cout << "l1: " << l1 << ", l2: " << l2 << std::endl;
-				std::cout << "output1: \"" << toString(fst.words[id1]) << "\", output2: \"" << toString(fst.words[id2])
-						  << "\"" << std::endl;
-				std::cout << "length1: " << fst.words[id1].size() << ", length2: " << fst.words[id2].size()
+				std::cout << "w1: \"" << print_if_can(m, w1) << "\", w2: \"" << print_if_can(m, w2) << "\""
 						  << std::endl;
+				std::cout << "length1: " << m.size(w1) << ", length2: " << m.size(w2) << std::endl;
 
 				return false;	  // not functional
 			}
@@ -210,18 +212,18 @@ bool isFunctional(const ExpandedFST<M> &fst) {
 }
 
 namespace cmp {
-template <class Letter>
-using State = typename ExpandedFST<Letter>::State;
+template <symbol Letter, free_monoid M>
+using State = typename ExpandedFST<Letter, M>::State;
 template <class Letter>
 using Delay = std::tuple<std::vector<Letter>, std::vector<Letter>>;
-template <class Letter>
-using AdmMap = unordered_set<std::tuple<std::tuple<State<Letter>, State<Letter>>, Delay<Letter>>>;
-template <class Letter>
-using AdmElem = AdmMap<Letter>::value_type;
+template <class Letter, class State>
+using AdmMap = unordered_set<std::tuple<std::tuple<State, State>, Delay<Letter>>>;
+template <class Letter, class State>
+using AdmElem = AdmMap<Letter, State>::value_type;
 
-template <class Letter>
+template <class Letter, class State>
 struct Cmp {
-	using datatype = std::reference_wrapper<const AdmElem<Letter>>;
+	using datatype = std::reference_wrapper<const AdmElem<Letter, State>>;
 	bool operator()(const datatype &a, const datatype &b) const {
 		auto &[q1, delay1] = a.get();
 		auto &[q2, delay2] = b.get();
@@ -231,9 +233,9 @@ struct Cmp {
 	}
 };
 
-template <class Letter>
+template <class Letter, class State>
 struct Cmp2 {
-	using datatype = std::tuple<State<Letter>, State<Letter>, std::reference_wrapper<const Delay<Letter>>>;
+	using datatype = std::tuple<State, State, std::reference_wrapper<const Delay<Letter>>>;
 	bool operator()(const datatype &a, const datatype &b) const {
 		auto &[u1, v1] = std::get<2>(a).get();
 		auto &[u2, v2] = std::get<2>(b).get();
@@ -243,11 +245,11 @@ struct Cmp2 {
 };	   // namespace cmp
 
 /// expects trimmed real-time FST
-template <class Letter>
-bool testBoundedVariation(const ExpandedFST<Letter> &fst) {
+template <symbol Letter, free_monoid M>
+bool testBoundedVariation(const ExpandedFST<Letter, M> &fst) {
 	// create the squared putput transducer and compute Adm(q) for every state q in it;
 
-	using State = typename ExpandedFST<Letter>::State;
+	using State = typename ExpandedFST<Letter, M>::State;
 
 	// check output of empty word
 	int eps_out = -1;
@@ -263,7 +265,7 @@ bool testBoundedVariation(const ExpandedFST<Letter> &fst) {
 	using AdmElem = AdmMap::value_type;
 
 	std::priority_queue<std::reference_wrapper<const AdmElem>, std::vector<std::reference_wrapper<const AdmElem>>,
-						cmp::Cmp<Letter>>
+						cmp::Cmp<Letter, State>>
 		queue;
 
 	std::vector<unsigned int> longestDelay(fst.N * fst.N, 0);
