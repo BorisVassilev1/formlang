@@ -7,7 +7,6 @@
 #include "InterningMonoid.hpp"
 #include "concepts.hpp"
 #include "transducer_concepts.hpp"
-#include "wordset.hpp"
 #include "debug.hpp"
 #include "datastructures.hpp"
 
@@ -87,6 +86,8 @@ class SparseSSFST {
 	// accepts a trimmed ExpandedFST and builds a subsequential finite-state transducer
 	// tests for bounded variation
 	SparseSSFST(ExpandedFST<Symbol, M> &&fsa, bool resolveNonFunctionality = false) : transitions(0) {
+		static_assert(ordered_monoid<M>, "Output monoid must be comparable for sorting");
+
 		unsigned int C		   = get<1>(fsa.GetMonoid()).C();
 		auto		 MAX_DELAY = C * fsa.N * fsa.N;		// C * |Q|^2
 		auto		 curr_max  = 0u;

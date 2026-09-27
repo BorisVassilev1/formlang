@@ -21,11 +21,6 @@ namespace fl {
 
 // Classical Finite State Transducer (FST) class template
 //
-// A transition carries a single value of a cartesian monoid combining the two
-// tapes (input/output words over Symbol) instead of an ad hoc pair of indices
-// into a hand-rolled word pool: Monoid::Value plays the role that the old
-// {StringID, StringID} tuple used to play, and InterningMonoid<Symbol> is the
-// (interning) pool for each tape.
 template <free_monoid I, monoid M>
 class SparseFST {
    public:

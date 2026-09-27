@@ -1,5 +1,6 @@
 #include <utils.h>
 #include <dpda.h>
+#include <iomanip>
 
 namespace fl {
 
@@ -43,6 +44,27 @@ std::string gen_random_string(const int min, const int max) {
 	if (min > max) { throw std::invalid_argument("min must be less than or equal to max"); }
 	int len = min + rand() % (max - min + 1);
 	return gen_random_string(len);
+}
+
+void print_escaped_char(std::ostream &out,unsigned char c) {
+	if(c > 127) {
+		out << "\\x" << std::hex << std::uppercase << std::setfill('0') << std::setw(2) << int(c) << std::dec;
+	} else {
+		switch (c) {
+			case '\\': out << "\\\\"; break;
+			case ' ': out << "(WS)"; break;
+			case '\n': out << "(NL)"; break;
+			case '\t': out << "(TAB)"; break;
+			case '\r': out << "(CR)"; break;
+			case '\"': out << "\\\""; break;
+			case '\v': out << "(VTAB)"; break;
+			case '\f': out << "(FF)"; break;
+			case '\a': out << "(BELL)"; break;
+			case '\b': out << "(BS)"; break;
+			case '\0': out << "(NULL)"; break;
+			default: out << char(c);
+		}
+	}
 }
 
 }	  // namespace fl

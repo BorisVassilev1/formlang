@@ -1,6 +1,7 @@
 #include "OutputFSA.hpp"
 #include "SSFT.hpp"
 #include "lex_traverser.hpp"
+#include "wordset.hpp"
 #include <cassert>
 #include <cctype>
 #include <cstring>

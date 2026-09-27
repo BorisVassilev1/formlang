@@ -142,11 +142,7 @@ class InterningMonoid {
 	std::span<const S> get(const TemporaryId &id) const { return storage->get(id); }
 	std::span<const S> get(const InfixId &id) const { return storage->get(id); }
 
-	/// A reference to an operand of mul(), by index rather than by pointer: an
-	/// operand that lives in storage->temporaries can't be a stable
-	/// std::span, since that vector may still grow. An index into it, on the
-	/// other hand, stays meaningful across reallocation, so we resolve the
-	/// actual pointer only once no more growth can happen (see mul() below).
+	// TODO: this may not be needed
 	struct Operand {
 		bool	 fromTemporaries;
 		uint32_t start;
@@ -575,11 +571,14 @@ class InterningMonoidElementPrinter {
 	InterningMonoidElementPrinter(const InterningMonoid<S> *monoid, const std::span<const S> &word)
 		: monoid(monoid), word(word) {}
 	friend std::ostream &operator<<(std::ostream &os, const InterningMonoidElementPrinter &p) {
-		if constexpr (OStreamable<S>) {
+		if constexpr (debug_printable_symbol<S>) {
+			for (const auto &c : p.word)
+				c.debug_print(os);
+		} else if constexpr (printable_symbol<S>) {
 			for (const auto &c : p.word)
 				os << c;
 		} else {
-			os << "unprintable symbols";
+			os << "\"unprintable\"";
 		}
 		return os;
 	}

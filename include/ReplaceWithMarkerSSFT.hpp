@@ -63,7 +63,14 @@ class ReplaceWithMarkerSSFT : public TotalSSFST<Symbol, alphabetSize, InterningM
 			if (offset < markerIndex) return m.from(std::span<const Symbol>{&match[offset], 1});
 			else return OutputMonoid::identity;
 		}
-		auto color(const OutputMonoid &m) const { return m.sub(rightHalfID, 1, match.size() - markerIndex - 1); }
+		// mirrors output(): builds a fresh value in whichever monoid `m` is, rather than
+		// reusing rightHalfID (an id only meaningful in the InterningMonoid that interned
+		// it) -- callers pass both tempData.words (during construction) and the SSFT's own,
+		// separate output monoid (for the final states), and rightHalfID isn't valid in the
+		// latter.
+		auto color(const OutputMonoid &m) const {
+			return m.from(std::span<const Symbol>{match.data() + markerIndex + 1, match.size() - markerIndex - 1});
+		}
 
 		/// words must be the same as the one used to construct the RuleMetadata
 		OutValue delay(InterningMonoid<Symbol> &words, size_t offset) const {
@@ -294,6 +301,8 @@ class ReplaceWithMarkerSSFT : public TotalSSFST<Symbol, alphabetSize, InterningM
 		for (auto &rule : rules) {
 			sortedRules.emplace_back(std::move(rule), marker, tempData.words);
 		}
+
+		static_assert(ordered_symbol<Symbol>);
 		// sort lexicographically
 		std::sort(sortedRules.begin(), sortedRules.end(), [](const RuleMetadata &a, const RuleMetadata &b) {
 			return std::lexicographical_compare(a.match.begin(), a.match.end(), b.match.begin(), b.match.end());

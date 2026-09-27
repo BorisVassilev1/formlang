@@ -165,4 +165,6 @@ void drawFSA(const T &fsa) {
 	std::cout << getString(p.err()) << std::endl;
 }
 
+void print_escaped_char(std::ostream &out, unsigned char c);
+
 }	  // namespace fl

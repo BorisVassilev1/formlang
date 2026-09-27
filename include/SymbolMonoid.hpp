@@ -32,13 +32,6 @@ class SymbolMonoid : eps_holder<_Symbol> {
 
 	using eps_holder<Symbol>::identity;
 
-	// Only length-<=1 words are representable as a Value here, so mul/invMul
-	// are only ever total when at least one side is the identity -- the
-	// out-of-domain case (two real symbols) is a precondition violation, not
-	// a well-formedness question, so it's an assert (checked when actually
-	// called/evaluated), not a static_assert (which would fire merely from
-	// this function's declaration being instantiated, e.g. by a concept
-	// check or by CartesianMonoid composing this tape with others).
 	constexpr Value mul(Value a, Value b) const {
 		if (a == identity) return b;
 		if (b == identity) return a;
@@ -51,13 +44,7 @@ class SymbolMonoid : eps_holder<_Symbol> {
 		assert(false && "SymbolMonoid::invMul: a is not a prefix of b");
 		std::unreachable();		// optimizer hint only, never load-bearing: assert() above is what actually guards this
 	}
-	// gen() must return the empty range for identity (eps is the empty word)
-	// and a length-1 range otherwise. A std::array<Symbol,1> can't shrink to
-	// length 0, and a std::span can't safely point back into the by-value `a`
-	// parameter -- CartesianMonoid::gen() takes its tuple argument by value
-	// and extracts per-tape references from that local copy before calling
-	// each tape's gen(), so a span into `a` would dangle the moment it
-	// returns. SymbolWord owns its one possible symbol by value instead.
+
 	class SymbolWord {
 		Symbol sym;
 		bool   nonEmpty;
@@ -107,13 +94,7 @@ class SymbolMonoid : eps_holder<_Symbol> {
 
 	constexpr Value p(Value a) const { return a; }
 
-	// SymbolMonoid holds no state of its own -- Value is a bare Symbol, so
-	// there's nothing to write/read here. Exists only so SymbolMonoid composes
-	// under a CartesianMonoid (e.g. ExpandedFST::Monoid) alongside a stateful
-	// output tape that does need serialize()/deserialize() on every tape.
 	SymbolMonoid() = default;
-	const SymbolMonoid &serialize(std::ostream &) const { return *this; }
-	explicit SymbolMonoid(std::istream &) {}
 };
 
 };	   // namespace fl

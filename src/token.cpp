@@ -1,6 +1,7 @@
 #include <token.h>
 #include <memory>
 #include <unordered_map>
+#include "utils.h"
 
 namespace fl {
 
@@ -28,8 +29,15 @@ Token Token::createDependentToken(const Token &base) {
 	return Token(Token::size);
 }
 
+void Token::debug_print(std::ostream &out) const {
+	if (value < Token::INITIAL_SIZE) print_escaped_char(out, static_cast<unsigned char>(value));
+	auto it = getTokenNames().find(value);
+	if (it == getTokenNames().end()) { out << value; }
+	out << it->second;
+}
+
 std::ostream &operator<<(std::ostream &out, const Token &v) {
-	if (v.value && v.value < 128) return out << static_cast<char>(v.value);
+	if (v.value < Token::INITIAL_SIZE) return out << static_cast<unsigned char>(v.value);
 	auto it = getTokenNames().find(v.value);
 	if (it == getTokenNames().end()) { return out << v.value; }
 	return out << it->second;

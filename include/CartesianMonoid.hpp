@@ -14,21 +14,12 @@
 
 namespace fl {
 
-// A cartesian monoid combining several "tapes", where each tape is backed by
-// one of the monoid instances physically stored in `Owned` (a std::tuple),
-// and `Slots...` says, per tape, *which* element of `Owned` that tape uses.
-// Tapes that repeat the same slot index share one physical monoid instance
-// instead of each owning an independent copy -- e.g. an FST whose two tapes
-// are both InterningMonoid<Symbol> (interning string pools) can use `Slots =
-// {0, 0}` over `Owned = std::tuple<InterningMonoid<Symbol>>` so both tapes
-// intern into the same pool, instead of duplicating it.
+// A cartesian product of monoids, where some of the monoids may be shared between the different slots of the product.
 //
-// The tape -> instance mapping is a compile-time constant, so getMonoid<I>()
-// always re-derives its reference by indexing into `owned`; nothing is
-// cached or aliased at the object level, so the implicitly-generated
-// copy/move constructors and assignment operators (which just copy/move
-// `owned`, an ordinary tuple of value types) are correct as-is -- there is
-// no pointer/reference state to fix up after a copy or move.
+// ! this is not a free monoid, even if all components are free monoids.
+// ! it is compactable if any of the components are compactable
+// ! it is serializable if any of the components are serializable
+// ! it is printable if all of the components are printable
 template <class Owned, std::size_t... Slots>
 class SharedCartesianMonoid;	 // primary template intentionally undefined; Owned must be a std::tuple
 
@@ -69,12 +60,6 @@ class SharedCartesianMonoid<std::tuple<OwnedTs...>, Slots...> : public Cartesian
    public:
 	using Value = std::tuple<typename ElemAt<Slots>::Value...>;
 
-	// Constrained (rather than an unconditional catch-all) so it doesn't
-	// out-compete a more specific constructor -- e.g. an exact-match single
-	// std::stringstream& argument would otherwise beat the istream&
-	// constructor below (which needs a derived-to-base conversion) in
-	// overload resolution, get selected, and then fail deep inside trying to
-	// construct a multi-element tuple from one stream.
 	template <class... Args>
 		requires std::constructible_from<OwnedTuple, Args...>
 	constexpr SharedCartesianMonoid(Args &&...args) : owned(std::forward<Args>(args)...) {}
@@ -119,22 +104,63 @@ class SharedCartesianMonoid<std::tuple<OwnedTs...>, Slots...> : public Cartesian
 	// InterningMonoid does, so this doesn't need non-const access to `owned`
 	// -- and it must be const, since compactable_monoid checks callability
 	// through a `const M&`.
-	template <std::size_t I>
-	void compactTape(const auto &...liveRanges) const {
-		if constexpr (fl::compactable_monoid<ElemAt<slots[I]>>) {
-			std::get<slots[I]>(owned).compact(
-				std::views::transform(liveRanges, [](const Value &v) { return std::get<I>(v); })...);
+	//
+	// Iterates over the physically OWNED monoids (index J into `owned`), not
+	// over the tapes: a monoid shared by several tapes (e.g. DiagonalMonoid,
+	// slots = {0, 0}) must see every tape's live values in a SINGLE compact()
+	// call, since compact() treats anything absent from the ranges it's given
+	// as dead and reclaims it right away -- calling it once per tape would
+	// have each call reclaim the other tape(s)' still-live entries out from
+	// under it.
+	template <std::size_t J, std::size_t I>
+	constexpr auto projectTapeIfOwned(const auto &...liveRanges) const {
+		if constexpr (slots[I] == J) {
+			return std::make_tuple(std::views::transform(liveRanges, [](const Value &v) { return std::get<I>(v); })...);
+		} else {
+			return std::tuple<>{};
 		}
 	}
 
-	template <std::size_t... Is>
-	void compactImpl(std::index_sequence<Is...>, const auto &...liveRanges) const {
-		(compactTape<Is>(liveRanges...), ...);
+	template <std::size_t J, std::size_t... Is>
+	void compactOwned(std::index_sequence<Is...>, const auto &...liveRanges) const {
+		if constexpr (fl::compactable_monoid<ElemAt<J>>) {
+			auto allRanges = std::tuple_cat(projectTapeIfOwned<J, Is>(liveRanges...)...);
+			if constexpr (std::tuple_size_v<decltype(allRanges)> > 0) {
+				std::apply([&](const auto &...ranges) { std::get<J>(owned).compact(ranges...); }, allRanges);
+			}
+		}
+	}
+
+	template <std::size_t... Js>
+	void compactImpl(std::index_sequence<Js...>, const auto &...liveRanges) const {
+		(compactOwned<Js>(std::make_index_sequence<NumTapes>{}, liveRanges...), ...);
 	}
 
 	template <std::size_t I>
 	constexpr const auto &getMonoid() const {
 		return std::get<slots[I]>(owned);
+	}
+
+	template <std::size_t I>
+	constexpr decltype(auto) deserizeTape(std::istream &in) const {
+		if constexpr (fl::serializable_monoid<ElemAt<I>>) {
+			return ElemAt<I>{in};
+		} else {
+			return ElemAt<I>{};
+		}
+	}
+	template <std::size_t... Is>
+	constexpr auto deserializeImpl(std::istream &in, std::index_sequence<Is...>) const {
+		return std::tuple(deserizeTape<Is>(in)...);
+	}
+
+	template <std::size_t I>
+	constexpr auto serializeTape(std::ostream &out) const {
+		if constexpr (fl::serializable_monoid<ElemAt<I>>) { std::get<I>(owned).serialize(out); }
+	}
+	template <std::size_t... Is>
+	constexpr void serializeImpl(std::ostream &out, std::index_sequence<Is...>) const {
+		(serializeTape<Is>(out), ...);
 	}
 
    public:
@@ -157,33 +183,22 @@ class SharedCartesianMonoid<std::tuple<OwnedTs...>, Slots...> : public Cartesian
 	template <std::ranges::input_range... Ranges>
 		requires((fl::range_of<Ranges, Value> && ...) && (fl::compactable_monoid<OwnedTs> || ...))
 	void compact(Ranges &&...liveRanges) const {
-		compactImpl(std::make_index_sequence<NumTapes>{}, liveRanges...);
+		compactImpl(std::make_index_sequence<sizeof...(OwnedTs)>{}, liveRanges...);
 	}
 
 	CartesianMonoidElementPrinter<std::tuple<OwnedTs...>, Slots...> p(const Value &v) const
 		requires(fl::printable_monoid<OwnedTs> && ...);
 
-	// Serializes each physically-owned monoid instance exactly once (by
-	// `owned`, not by tape/slot -- two tapes sharing one instance via a
-	// repeated slot, e.g. DiagonalMonoid, must not have it written twice).
-	// Unlike compact(), this needs EVERY owned monoid to be serializable, not
-	// just some: a tape silently skipped here couldn't be reconstructed on
-	// read, so there's no "some tapes" escape hatch the way compact() has.
 	const SharedCartesianMonoid &serialize(std::ostream &out) const
-		requires(fl::serializable_monoid<OwnedTs> && ...)
+		requires(fl::serializable_monoid<OwnedTs> || ...)
 	{
-		std::apply([&](const auto &...m) { (m.serialize(out), ...); }, owned);
+		serializeImpl(out, std::make_index_sequence<sizeof...(OwnedTs)>{});
 		return *this;
 	}
 
-	// Reads back `owned` in the same order serialize() wrote it. The braced
-	// init-list (not a parenthesized call) is load-bearing: list-init
-	// sequences each element's construction left to right, guaranteeing the
-	// per-monoid reads happen in the same order they were written in, which
-	// ordinary function-argument evaluation order would NOT guarantee.
 	explicit SharedCartesianMonoid(std::istream &in)
-		requires(fl::serializable_monoid<OwnedTs> && ...)
-		: owned{OwnedTs(in)...} {}
+		requires(fl::serializable_monoid<OwnedTs> || ...)
+		: owned{deserializeImpl(in, std::make_index_sequence<sizeof...(OwnedTs)>{})} {}
 
 	template <std::size_t I, cartesian_monoid C>
 	friend constexpr decltype(auto) get(C &&);
@@ -199,8 +214,9 @@ struct CartesianMonoidElementPrinter {
 template <class... OwnedTs, std::size_t... Slots>
 	requires(fl::monoid<std::remove_cvref_t<OwnedTs>> && ...) &&
 			(sizeof...(Slots) >= 1)
-			CartesianMonoidElementPrinter<std::tuple<OwnedTs...>, Slots...> SharedCartesianMonoid<std::tuple<OwnedTs...>, Slots...>::p(
-				const typename SharedCartesianMonoid<std::tuple<OwnedTs...>, Slots...>::Value &v) const
+			CartesianMonoidElementPrinter<std::tuple<OwnedTs...>, Slots...> SharedCartesianMonoid<
+				std::tuple<OwnedTs...>,
+				Slots...>::p(const typename SharedCartesianMonoid<std::tuple<OwnedTs...>, Slots...>::Value &v) const
 				requires(fl::printable_monoid<OwnedTs> && ...)
 {
 	return {*this, v};
@@ -259,7 +275,8 @@ constexpr decltype(auto) out(C &&cartesian) {
 
 template <class... OwnedTs, std::size_t... Slots>
 	requires(fl::monoid<std::remove_cvref_t<OwnedTs>> && ...) && (sizeof...(Slots) >= 1)
-struct std::formatter<fl::CartesianMonoidElementPrinter<std::tuple<OwnedTs...>, Slots...>, char> : fl::ostream_formatter {};
+struct std::formatter<fl::CartesianMonoidElementPrinter<std::tuple<OwnedTs...>, Slots...>, char>
+	: fl::ostream_formatter {};
 
 template <class C>
 	requires std::derived_from<C, fl::CartesianMonoidBase>

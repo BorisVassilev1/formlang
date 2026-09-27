@@ -12,8 +12,7 @@
 #include "concepts.hpp"
 #include "CartesianMonoid.hpp"
 #include "SymbolMonoid.hpp"
-#include "utils.h"
-#include "debug.hpp"
+#include "transducer_concepts.hpp"
 
 namespace fl {
 
@@ -43,18 +42,14 @@ class ExpandedFST {
 	Monoid monoid;	   // owns the (trivial) input-symbol tape and the output tape's pool
 	Map	   transitions;
 
-	/// Mihov & Schulz's f(eps): the output(s) reachable by the empty input
-	/// word at the level of the whole FST -- only meaningful once
-	/// epsilon-input transitions have been eliminated (removeUpperEpsilonFST).
-	/// A plain vector deduped via OutputMonoid::equal, since OutValue isn't
-	/// guaranteed hashable/comparable with std::hash/operator== (e.g. an
-	/// InterningMonoid::WordId has neither) -- only the monoid instance that
-	/// owns it knows how to compare two of its values.
-	std::vector<OutValue> f_eps{};
+	// the set  of (epslon, x) \in the relation
+	std::unordered_set<OutValue, monoid_hash<OutputMonoid>, monoid_equal<OutputMonoid>> f_eps{};
 
 	constexpr ExpandedFST()
 		requires(std::is_default_constructible_v<Monoid>)
-		: N(0), monoid() {}
+		: N(0),
+		  monoid(),
+		  f_eps(0, monoid_hash<OutputMonoid>(&get<1>(monoid)), monoid_equal<OutputMonoid>(&get<1>(monoid))) {}
 
 	constexpr ExpandedFST(const ExpandedFST &)			  = default;
 	constexpr ExpandedFST(ExpandedFST &&)				  = default;
@@ -83,12 +78,11 @@ class ExpandedFST {
 		return Value(a, get<1>(monoid).own(get<1>(src), b));
 	}
 
-	/// insert v into f_eps if it isn't already there (dedup via the owning monoid's equal())
 	void addFEps(OutValue v) {
 		for (const auto &existing : f_eps) {
 			if (get<1>(monoid).equal(existing, v)) return;
 		}
-		f_eps.push_back(std::move(v));
+		f_eps.emplace(std::move(v));
 	}
 
 	void print(std::ostream &out) const {
@@ -135,32 +129,22 @@ class ExpandedFST {
 	}
 };
 
-/// extracts the label (the full Monoid::Value tuple) out of every (label, to)
-/// entry in a transitions map, for feeding into Monoid::compact() as one of
-/// its live-value ranges.
+/// view of only the monoid elements
 template <class Map>
 auto transitionValues(const Map &transitions) {
 	return transitions | std::views::values |
 		   std::views::transform([](const auto &labelAndTo) { return std::get<0>(labelAndTo); });
 }
 
-/// f_eps only ever holds OutputMonoid::Value (there's no meaningful input
-/// symbol for "the output of the empty input word"), but Monoid::compact()
-/// needs ranges of the FULL Monoid::Value tuple so it can slice per tape --
-/// pairs each one with a placeholder input symbol (never read: compact() only
-/// ever touches the tapes that are actually compactable, and InputMonoid is
-/// SymbolMonoid, which never is).
+/// view of only the monoid elements
 template <symbol Symbol, monoid M>
 auto fEpsAsValues(const ExpandedFST<Symbol, M> &fsa) {
 	using Value = typename ExpandedFST<Symbol, M>::Value;
 	return fsa.f_eps | std::views::transform([](const auto &v) { return Value(Symbol::eps, v); });
 }
 
-/// splits every (possibly multi-symbol-in, multi-symbol-out) transition of a
-/// SparseFST into a chain of single-input-symbol (or epsilon-input)
-/// transitions, greedily attaching output symbols one at a time to the
-/// input-symbol hop they line up with, and dumping any leftover output (when
-/// |w1| < |w2|) or leftover input (when |w1| > |w2|) onto the last hop.
+/// expands the transducer. in the case where output is longer than input,
+/// it will leave a whole excess word on the output tape to save space.
 template <free_monoid I, monoid M>
 auto expandFST(SparseFST<I, M> &&fst) {
 	using Symbol = typename I::Symbol;
@@ -307,9 +291,7 @@ auto removeUpperEpsilonFST(ExpandedFST<Symbol, InterningMonoid<Symbol>> &&fsa) {
 	return std::move(fsa);
 }
 
-/// discards states unreachable from an initial state or that can't reach a
-/// final state, and (when OutputMonoid supports it) compacts away whatever
-/// pool entries only the discarded transitions referenced.
+/// Trims the FSA
 template <symbol Symbol, monoid M>
 auto trimFSA(ExpandedFST<Symbol, M> &&fsa) {
 	using State	 = typename ExpandedFST<Symbol, M>::State;
@@ -420,38 +402,50 @@ auto realtimeFST(StringFST<Symbol> &&fst) {
 	return trimFSA(removeUpperEpsilonFST(expandFST(removeEpsilonFST(trimFSA(std::move(fst))))));
 }
 
-/// Pseudo-determinization of an Expanded FST that has to be real-time
-/// (Mihov & Schulz): merges states reachable by identical (input symbol,
-/// output value) pairs into a single "big state" (a subset of the original
-/// states), without factoring out common output prefixes -- that's the job
-/// of a later, real determinization pass. Reuses fst's own monoid wholesale
-/// (dfa.monoid = std::move(fst.monoid)) since no new words are created here,
-/// only states are merged.
-template <symbol Symbol, free_monoid M>
-auto pseudoDeterminizeFST(ExpandedFST<Symbol, M> &&fst) {
-	using FSA_t	 = ExpandedFST<Symbol, M>;
-	using Monoid = typename FSA_t::Monoid;
-	using State	 = typename FSA_t::State;
+/// Pseudo-determinization of any real-time FST
+template <class T>
+	requires FST<T>
+auto pseudoDeterminizeFST(const T &fst) {
+	using Symbol   = typename get_input_t<T>::Symbol;
+	using M		   = get_output_t<T>;
+	using FSA_t	   = ExpandedFST<Symbol, M>;
+	using Monoid   = typename FSA_t::Monoid;
+	using InState  = typename T::State;
+	using OutState = typename FSA_t::State;
+	using Value	   = typename Monoid::Value;
 
-	using BigState = std::vector<State>;
+	using BigState = std::vector<InState>;
 
-	FSA_t dfa;
-	dfa.monoid = std::move(fst.monoid);		// no new interning needed, only states are merged
-	dfa.f_eps  = std::move(fst.f_eps);		// f(eps) is a property of the whole automaton, unaffected by state merging
+	FSA_t dfa;	   // starts with a fresh, empty pool of its own
+	if constexpr (requires { fst.f_eps; }) {
+		for (const auto &v : fst.f_eps) {
+			dfa.addFEps(get<1>(dfa.monoid).own(get<1>(fst.GetMonoid()), v));
+		}
+	}
+
+	// the base FSA interface only guarantees a flat edge list (Transitions()),
+	// not a per-state one (that's FSA_with_arcs), so index it by source state
+	// once, re-interning every label into dfa's own pool along the way so
+	// everything downstream (hashing/comparing/storing labels) lives in one
+	// consistent pool
+	fl::unordered_map<InState, std::vector<std::tuple<Value, InState>>> adjacency;
+	for (const auto &[from, label, to] : fst.Transitions()) {
+		adjacency[from].emplace_back(dfa.reintern(fst.GetMonoid(), label), to);
+	}
 
 	std::vector<std::reference_wrapper<const BigState>> states;
-	fl::unordered_map<BigState, State>					state_map;
-	std::queue<State>									queue;
+	fl::unordered_map<BigState, OutState>				state_map;
+	std::queue<OutState>								queue;
 
-	auto getStateID = [&](BigState &&bs) -> std::pair<State, bool> {
+	auto getStateID = [&](BigState &&bs) -> std::pair<OutState, bool> {
 		std::ranges::sort(bs);
 		bs.erase(std::unique(bs.begin(), bs.end()), bs.end());
 
 		auto it = state_map.find(bs);
 		if (it == state_map.end()) {
-			State new_id = dfa.newState();
+			OutState new_id = dfa.newState();
 			for (const auto &s : bs) {
-				if (fst.qFinals.contains(s)) {
+				if (fst.IsFinal(s)) {
 					dfa.qFinals.insert(new_id);
 					break;
 				}
@@ -464,24 +458,24 @@ auto pseudoDeterminizeFST(ExpandedFST<Symbol, M> &&fst) {
 		}
 	};
 
-	auto [initial_state, _] = getStateID(BigState{std::from_range, fst.qFirsts});
+	auto [initial_state, _] = getStateID(BigState{std::from_range, fst.Initial()});
 	queue.push(initial_state);
 	dfa.qFirsts.insert(initial_state);
 
-	std::unordered_map<typename Monoid::Value, BigState, monoid_hash<Monoid>, monoid_equal<Monoid>> current_transitions(
+	std::unordered_map<Value, BigState, monoid_hash<Monoid>, monoid_equal<Monoid>> current_transitions(
 		0, monoid_hash<Monoid>(&dfa.monoid), monoid_equal<Monoid>(&dfa.monoid));
 
 	while (!queue.empty()) {
-		State current = queue.front();
+		OutState current = queue.front();
 		queue.pop();
 		const BigState &current_bs = states[current];
 
 		current_transitions.clear();
 
 		for (const auto &q : current_bs) {
-			auto [i1, i2] = fst.transitions.equal_range(q);
-			for (const auto &[_, value] : std::ranges::subrange(i1, i2)) {
-				const auto &[label, to] = value;
+			auto it = adjacency.find(q);
+			if (it == adjacency.end()) continue;
+			for (const auto &[label, to] : it->second) {
 				current_transitions[label].push_back(to);
 			}
 		}
@@ -497,7 +491,7 @@ auto pseudoDeterminizeFST(ExpandedFST<Symbol, M> &&fst) {
 	// drawFSA(dfa);
 
 	// the subset construction only ever visits states reachable from
-	// fst.qFirsts (the BFS over `queue`) -- pool entries that were only
+	// fst.Initial() (the BFS over `queue`) -- pool entries that were only
 	// referenced by transitions out of unreached states are now dead.
 	if constexpr (compactable_monoid<Monoid>) {
 		dfa.monoid.compact(transitionValues(dfa.transitions), fEpsAsValues(dfa));
@@ -505,4 +499,51 @@ auto pseudoDeterminizeFST(ExpandedFST<Symbol, M> &&fst) {
 
 	return dfa;
 }
+
+/// Reverses any FST
+template <class T>
+	requires FST<T>
+auto reverseFST(const T &fst) {
+	using Symbol   = typename get_input_t<T>::Symbol;
+	using M		   = get_output_t<T>;
+	using FSA_t	   = ExpandedFST<Symbol, M>;
+	using OutState = typename FSA_t::State;
+
+	FSA_t rev;
+	rev.N = fst.Size();
+
+	for (const auto &q : fst.Initial())
+		rev.qFinals.insert(OutState(q));
+	for (const auto &q : fst.Final())
+		rev.qFirsts.insert(OutState(q));
+
+	for (const auto &[from, label, to] : fst.Transitions()) {
+		rev.addTransition(OutState(to), rev.reintern(fst.GetMonoid(), label), OutState(from));
+	}
+
+	if constexpr (requires { fst.f_eps; }) {	 /// TODO: this is a hack
+		// f(eps) doesn't depend on transition direction, just re-interned into rev's own pool
+		for (const auto &v : fst.f_eps) {
+			rev.addFEps(get<1>(rev.monoid).own(get<1>(fst.GetMonoid()), v));
+		}
+	}
+
+	if constexpr (compactable_monoid<typename FSA_t::Monoid>) {
+		rev.monoid.compact(transitionValues(rev.transitions), fEpsAsValues(rev));
+	}
+
+	return rev;
+}
+
+// Pseudo-minimization
+template <class T>
+	requires FST<T>
+auto pseudoMinimizeFST(const T &fst) {
+	return pseudoDeterminizeFST(reverseFST(pseudoDeterminizeFST(reverseFST(fst))));
+}
+
+static_assert(FST<ExpandedFST<Letter, InterningMonoid<Letter>>>,
+			  "ExpandedFST does not satisfy the FST concept required by pseudoDeterminizeFST/reverseFST/"
+			  "pseudoMinimizeFST");
+
 }	  // namespace fl
