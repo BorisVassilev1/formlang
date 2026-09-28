@@ -90,18 +90,26 @@ int main() {
 	fl::statFSA(ssft);
 	fl::drawFSA(ssft);
 
-	std::cout << "Input: ";
+	std::cout << "          Input: ";
 	std::vector<ms> input = toMySymbol("_abd_cc_abc_aa_abd_c_abd_abdd_abdd_ab_c_a_bb_a_");
 	for (const auto &l : input) {
 		std::cout << l;
 	}
 	std::cout << std::endl;
 	std::vector<ms> output = ssft.f(input);
-	std::cout << "Output: ";
-	for (const auto &l : output) {
+
+	std::cout << "         Output: ";
+	for (const auto &l : output)
 		std::cout << l;
-	}
 	std::cout << std::endl;
 
+	auto expectedOutput = toMySymbol("_abdcc_abc_aa_abdc_abd_abdd_abddab_c_abb_a_");
+	if (output == expectedOutput) {
+		std::cout << "Test passed!" << std::endl;
+	} else {
+		std::cout << "Expected Output: ";
+		for (const auto &l : expectedOutput)
+			std::cout << l;
+	}
 	return 0;
 }

@@ -91,7 +91,8 @@ class TotalSSFST {
 				   return std::make_tuple(typename Monoid::Value(letter, transition.outputID), transition.next);
 			   });
 	}
-	[[clang::always_inline]] inline auto Transition(State state, Symbol letter) const {
+	[[clang::always_inline]] inline std::optional<std::tuple<OutValue, State>> Transition(State	 state,
+																						  Symbol letter) const {
 		return transitions[state][size_t(letter)];
 	}
 
@@ -238,3 +239,6 @@ bool isCanonical(const Transducer &t) {
 #include "letter.hpp"
 static_assert(fl::SSFSTI<fl::TotalSSFST<fl::Letter>>,
 			  "TotalSSFT does not satisfy the subsequential transducer concept");
+
+static_assert(fl::SSFSTI_traversable<fl::TotalSSFST<fl::Letter>>,
+			  "TotalSSFT does not satisfy the subsequential transducer traversable concept");

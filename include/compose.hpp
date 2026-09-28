@@ -1,19 +1,17 @@
 #pragma once
 
-#include <queue>
 #include <cassert>
-#include <iomanip>
+#include <queue>
 
 #include "TotalSSFT.hpp"
-#include "concepts.hpp"
+#include "transducer_concepts.hpp"
 #include "datastructures.hpp"
-#include "utils.h"
 
 namespace fl {
 
 /// Composes two subsequential transducers
-template <SSFST T1, SSFST T2>
-	requires(free_monoid<typename T1::OutputMonoid> &&
+template <FST T1, FST T2>
+	requires(FST_with_arcs<T1> && FST_traversable<T2> &&
 			 std::same_as<typename T1::OutputMonoid::Symbol, typename T2::InputMonoid::Symbol>)
 class ComposeSSFST : public TotalSSFST<typename T1::Letter_t, T1::alphabet_size, get_output_t<T2>> {
 	using Symbol	   = typename T1::Letter_t;
@@ -46,24 +44,42 @@ class ComposeSSFST : public TotalSSFST<typename T1::Letter_t, T1::alphabet_size,
 		};
 
 		// Returns the accumulated OutValue and the T2 state reached.
-		auto driveSecond = [&](State2								   s2,
-							   const typename T1::OutputMonoid::Value &midWord) -> std::pair<OutValue, State2> {
-			auto word = get<1>(first.GetMonoid()).gen(midWord);
-			if (word.empty()) return {OutputMonoid::identity, s2};
+		auto driveSecond =
+			[&](State2									s2,
+				const typename T1::OutputMonoid::Value &midWord) -> std::optional<std::pair<OutValue, State2>> {
+			if (midWord == get<1>(first.GetMonoid()).identity) {
+				if constexpr (SSFSTI<T2>)
+					return std::pair{outMonoid.own(get<1>(second.GetMonoid()), second.InitialOutput()), s2};
+				else return std::pair{OutputMonoid::identity, s2};
+			}
 
-			auto symIt		   = word.begin();
-			auto [val2, next2] = second.Transitions(s2)[*symIt];
+			auto word  = get<1>(first.GetMonoid()).gen(midWord);
+			auto symIt = word.begin();
+
+			auto t = second.Transition(s2, *symIt);
+			if (!t) return std::nullopt;
+			auto [val2, next2] = *t;
+
 			// this may not be T2::OutputMonoid::Value, but is convertible to it
-			auto acc = outMonoid.own(get<1>(second.GetMonoid()), std::get<1>(val2));
-			s2		 = next2;
+			auto acc = outMonoid.own(get<1>(second.GetMonoid()), val2);
+			if constexpr (SSFSTI<T2>) {
+				auto t2InitOut	  = second.InitialOutput();
+				auto t2InitOutVal = outMonoid.own(get<1>(second.GetMonoid()), t2InitOut);
+				acc				  = outMonoid.mul(t2InitOutVal, acc);
+			}
+
+			s2 = next2;
 
 			for (++symIt; symIt != word.end(); ++symIt) {
-				auto [valN, nextN] = second.Transitions(s2)[*symIt];
-				auto piece		   = outMonoid.own(get<1>(second.GetMonoid()), std::get<1>(valN));
-				acc				   = outMonoid.mul(acc, piece);
-				s2				   = nextN;
+				auto tN = second.Transition(s2, *symIt);
+				if (!tN) return std::nullopt;
+				auto [valN, nextN] = *tN;
+
+				auto piece = outMonoid.own(get<1>(second.GetMonoid()), valN);
+				acc		   = outMonoid.mul(acc, piece);
+				s2		   = nextN;
 			}
-			return {OutValue(acc), s2};
+			return std::pair{OutValue(acc), s2};
 		};
 
 		State1 s1init = *first.Initial().begin();
@@ -71,11 +87,19 @@ class ComposeSSFST : public TotalSSFST<typename T1::Letter_t, T1::alphabet_size,
 
 		State2 s2afterInit = s2init;
 		if constexpr (SSFSTI<T1>) {
-			auto [initOut, s2New] = driveSecond(s2init, first.InitialOutput());
+			auto res = driveSecond(s2init, first.InitialOutput());
+			if (!res) {
+				// create initial state and exit;
+				stateID({s1init, s2init});
+				return;
+			}
+			auto [initOut, s2New] = *res;
 			this->initialOut	  = initOut;
 			s2afterInit			  = s2New;
 		} else {
-			this->initialOut = OutputMonoid::identity;
+			if constexpr (SSFSTI<T2>)
+				this->initialOut = outMonoid.own(get<1>(second.GetMonoid()), second.InitialOutput());
+			else this->initialOut = OutputMonoid::identity;
 		}
 
 		BigState			 initialState{s1init, s2afterInit};
@@ -93,14 +117,19 @@ class ComposeSSFST : public TotalSSFST<typename T1::Letter_t, T1::alphabet_size,
 
 			// Psi: T1's final output at s1, threaded through T2 from s2,
 			// then second's own final output at the T2 state that lands on.
-			auto [midOut, s2final]	= driveSecond(s2, first.Psi(s1));
-			OutValue secondFinal	= outMonoid.own(get<1>(second.GetMonoid()), second.Psi(s2final));
-			this->output[currentID] = outMonoid.mul(midOut, secondFinal);
+			auto res = driveSecond(s2, first.Psi(s1));
+			if (res) {
+				auto [midOut, s2final]	= *res;
+				OutValue secondFinal	= outMonoid.own(get<1>(second.GetMonoid()), second.Psi(s2final));
+				this->output[currentID] = outMonoid.mul(midOut, secondFinal);
+			}
 
-			for (Symbol l = 0; l < T1::alphabet_size; ++l) {
-				auto [val1, next1]	 = first.Transitions(s1)[l];
-				const auto &midWord	 = std::get<1>(val1);
-				auto [outVal, next2] = driveSecond(s2, midWord);
+			for (const auto &[val, next1] : first.Transitions(s1)) {
+				const auto &[l, midWord] = val;
+				// auto [outVal, next2]	 = driveSecond(s2, midWord);
+				auto res2 = driveSecond(s2, midWord);
+				if (!res2) continue;	 // no transition in T2 for this midWord
+				auto [outVal, next2] = *res2;
 
 				BigState nextState						= {next1, next2};
 				State	 nextID							= stateID(nextState);
