@@ -1,13 +1,10 @@
+import formlang;
+
 #include <cstring>
 #include <fstream>
 #include <iostream>
-#include <regexParser.hpp>
-#include <FST.hpp>
-#include <ExpandedFST.hpp>
-#include <letter.hpp>
-#include "SSFT.hpp"
-#include "ambiguity.hpp"
-#include "functionality.hpp"
+#include <chrono>
+#include "utils_macros.hpp"
 
 using namespace fl;
 
@@ -74,13 +71,13 @@ int main(int argc, char **argv) {
 	BENCH(infAmbiguity = testInfiniteAmbiguity(fst), 100, "BENCH testInfiniteAmbiguity: ");
 	std::cout << "Testing infinite ambiguity: " << testInfiniteAmbiguity(fst) << std::endl;
 
-	BENCH(fst = trimFSA<Letter>(std::move(fst));, 1, "BENCH trimFSA: ");
-	BENCH(fst = removeEpsilonFST<Letter>(std::move(fst));, 1, "BENCH removeEpsilonFST: ");
+	BENCH(fst = trimFSA(std::move(fst));, 1, "BENCH trimFSA: ");
+	BENCH(fst = removeEpsilonFST(std::move(fst));, 1, "BENCH removeEpsilonFST: ");
 	if (tokens.size() < 1000) drawFSA(fst);
 	std::cout << "FSA has " << fst.N << " states and " << fst.transitions.size() << " transitions and "
 			  << fst.wordCount() << " words after removing epsilons." << std::endl;
 
-	BENCH(fst = trimFSA<Letter>(std::move(fst));, 1, "BENCH trimFSA again: ");
+	BENCH(fst = trimFSA(std::move(fst));, 1, "BENCH trimFSA again: ");
 	if (tokens.size() < 1000) drawFSA(fst);
 	std::cout << "FSA has " << fst.N << " states and " << fst.transitions.size() << " transitions and "
 			  << fst.wordCount() << " words after trimming." << std::endl;
@@ -97,7 +94,7 @@ int main(int argc, char **argv) {
 		std::cout << "Real-time FSA has " << efst.N << " states and " << efst.transitions.size() << " transitions."
 				  << std::endl;
 
-		BENCH(efst = trimFSA<Letter>(std::move(efst));, 1, "BENCH trimFSA again: ");
+		BENCH(efst = trimFSA(std::move(efst));, 1, "BENCH trimFSA again: ");
 		if (tokens.size() < 1000) drawFSA(efst);
 		std::cout << "Trimmed FSA has " << efst.N << " states and " << efst.transitions.size() << " transitions."
 				  << std::endl;

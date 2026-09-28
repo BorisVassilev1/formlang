@@ -1,6 +1,5 @@
-#include <earley.hpp>
-#include <cfg.h>
-#include <letter.hpp>
+import formlang;
+
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "../doctest.h"
 

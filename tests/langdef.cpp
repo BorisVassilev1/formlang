@@ -1,12 +1,9 @@
+import formlang;
+
 #include <ios>
 #include <iostream>
-
-#include <parser.h>
-#include <token.h>
-#include <grammar_factory.hpp>
-#include <lex_traverser.hpp>
-#include <letter.hpp>
-#include "OutputFSA.hpp"
+#include <climits>
+#include <ranges>
 
 int main() {
 	using namespace ll1g;

@@ -1,6 +1,7 @@
-#include "cfg.h"
-#include <assert.h>
-#include "letter.hpp"
+import formlang;
+#include <cassert>
+#include <cstdlib>
+#include <ctime>
 
 int main() {
 	fl::CFG<fl::Letter> g;

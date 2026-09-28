@@ -1,6 +1,8 @@
+import formlang;
+
 #include <iostream>
-#include "ReplaceWithMarkerSSFT.hpp"
-#include "token.h"
+#include <compare>
+#include <vector>
 
 class MySymbol {
    public:
@@ -20,6 +22,7 @@ class MySymbol {
 
 	constexpr auto operator<=>(std::size_t other) const { return (size_t)value <=> other; }
 	constexpr auto operator<=>(const MySymbol &other) const = default;
+	constexpr bool	operator==(const MySymbol &other) const { return value == other.value; }
 
 	constexpr static size_t size = 5;
 	const static MySymbol	eps;

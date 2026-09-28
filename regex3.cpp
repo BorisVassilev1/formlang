@@ -1,12 +1,7 @@
-#include <format>
+import formlang;
+
 #include <iostream>
-#include "utils.h"
-#include "FST.hpp"
-#include "SSFT.hpp"
-#include "ExpandedFST.hpp"
-#include "ambiguity.hpp"
-#include "functionality.hpp"
-#include "letter.hpp"
+
 
 using namespace std::string_literals;
 
@@ -59,8 +54,8 @@ int main() {
 	std::cout << "regex: " << S << std::endl;
 
 	auto regex = rgx::parseRegex(S);
-	auto fst   = (FST<Letter>)makeFSA_BerriSethi<Letter>(*regex);
-	fst		   = trimFSA<Letter>(std::move(fst));
+	auto fst   = (StringFST<Letter>)makeFSA_BerriSethi<Letter>(*regex);
+	fst		   = trimFSA(std::move(fst));
 
 	std::cout << "FSA has " << fst.N << " states and " << fst.transitions.size() << " transitions." << std::endl;
 
@@ -94,9 +89,9 @@ int main() {
 
 	try {
 		std::cout << "converting to SSFT..." << std::endl;
-		auto ssfst = SSFT<fl::Letter>(std::move(realtime));
+		auto ssfst = SparseSSFST<fl::Letter>(std::move(realtime));
 
-		std::cout << "SSFT has " << ssfst.N << " states and " << ssfst.transitions.size() << " transitions."
+		std::cout << "SSFT has " << ssfst.Size() << " states and " << ssfst.Transitions().size() << " transitions."
 				  << std::endl;
 
 		std::string input;

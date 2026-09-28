@@ -1,9 +1,7 @@
+import formlang;
+
 #include <iostream>
 #include <string>
-#include "ExpandedFST.hpp"
-#include "letter.hpp"
-#include "regexParser.hpp"
-#include "FST.hpp"
 
 using namespace std::string_literals;
 
@@ -59,13 +57,13 @@ int main() {
 	std::cout << "regex: " << N << std::endl;
 
 	auto regex = rgx::parseRegex(N);
-	auto fst   = (FST<Letter>)makeFSA_BerriSethi<Letter>(*regex);
-	fst		   = trimFSA<Letter>(std::move(fst));
+	auto fst   = (StringFST<Letter>)makeFSA_BerriSethi<Letter>(*regex);
+	fst		   = trimFSA(std::move(fst));
 
 	std::cout << "FSA has " << fst.N << " states and " << fst.transitions.size() << " transitions." << std::endl;
 
 	bool infAmb = testInfiniteAmbiguity(fst);
-	// drawFSA(fst);
+	drawFSA(fst);
 	std::cout << "infinite ambiguity: " << infAmb << std::endl;
 	if (infAmb) {
 		std::cerr << "The FSA is infinitely ambiguous!" << std::endl;
@@ -94,10 +92,10 @@ int main() {
 
 	try {
 		std::cout << "converting to SSFT..." << std::endl;
-		auto ssfst = SSFT<fl::Letter>(std::move(realtime));
+		auto ssfst = SparseSSFST<fl::Letter>(std::move(realtime));
 		drawFSA(ssfst);
 
-		std::cout << "SSFT has " << ssfst.N << " states and " << ssfst.transitions.size() << " transitions."
+		std::cout << "SSFT has " << ssfst.Size() << " states and " << ssfst.Transitions().size() << " transitions."
 				  << std::endl;
 
 		std::string input;

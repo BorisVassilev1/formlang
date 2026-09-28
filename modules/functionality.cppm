@@ -1,0 +1,369 @@
+module;
+
+#include <functional>
+#include <iterator>
+#include <ranges>
+#include <string_view>
+#include <unordered_set>
+#include <span>
+#include <cassert>
+#include <queue>
+#include <iostream>
+#include <chrono>
+#include <algorithm>
+#include <vector>
+
+export module formlang:functionality;
+
+import :expanded_fst;
+import :datastructures;
+import :concepts;
+import :cartesian_monoid;
+import :utils;
+
+namespace fl {
+using sv = std::string_view;
+
+template <class U, class V>
+auto remainderSuffix(U &&w, V &&s) {
+	assert(std::distance(std::begin(w), std::end(w)) <= std::distance(std::begin(s), std::end(s)));
+	return std::ranges::subrange(std::begin(s) + std::distance(std::begin(w), std::end(w)), std::end(s));
+}
+
+template <class U, class V, class W, class X>
+auto w(U &&u, V &&v, W &&alpha, X &&beta) {
+	auto u_alpha = std::views::concat(u, alpha);
+	auto v_beta	 = std::views::concat(v, beta);
+	auto c		 = commonPrefix(u_alpha, v_beta);
+	return std::tuple((remainderSuffix(c, std::move(u_alpha))), (remainderSuffix(c, std::move(v_beta))));
+}
+
+template <class Letter, class U, class V, class W, class X>
+auto w_noref(U &&u, V &&v, W &&alpha, X &&beta) {
+	auto u_alpha = std::views::concat(u, alpha);
+	auto v_beta	 = std::views::concat(v, beta);
+	auto c		 = commonPrefix(u_alpha, v_beta);
+	return std::tuple(toSymbol<Letter>(remainderSuffix(c, std::move(u_alpha))),
+					  toSymbol<Letter>(remainderSuffix(c, std::move(v_beta))));
+}
+
+template <class U, class V>
+bool balancible(U &&u, V &&v) {
+	return u.size() == 0 || v.size() == 0;
+}
+
+template <class T>
+bool balancible(T &&t) {
+	return balancible(std::get<0>(t), std::get<1>(t));
+}
+
+template <free_monoid M>
+bool balancible(const M &m, auto u, auto v) {
+	return m.size(u) == 0 || m.size(v) == 0;
+}
+
+template <class U, class V>
+bool eq(U &&u, V &&v) {
+	return std::equal(std::begin(u), std::end(u), std::begin(v), std::end(v));
+}
+
+auto tovector = [](const auto &x) { return std::vector(x.begin(), x.end()); };
+
+}	  // namespace fl
+
+export namespace fl {
+
+/// expects trimmed real-time FST
+template <symbol S, free_monoid M>
+bool isFunctional(const ExpandedFST<S, M> &fst) {
+	// create the squared putput transducer and compute Adm(q) for every state q in it;
+
+	using State	  = typename ExpandedFST<S, M>::State;
+	using Symbol  = typename M::Symbol;
+	const auto &m = get<1>(fst.GetMonoid());
+
+	// check output of empty word
+	if (fst.f_eps.size() > 1) return false;
+
+	unordered_map<std::tuple<State, State>, std::tuple<std::vector<Symbol>, std::vector<Symbol>>> Adm;
+	std::queue<std::tuple<State, State>>														  queue;
+
+	std::vector<bool> coFinals(fst.N * fst.N, false);
+	{
+		std::vector<std::vector<std::tuple<Symbol, State>>> reverseTransitions;
+		reverseTransitions.resize(fst.N);
+		for (const auto &[from, value, to] : fst.Transitions()) {
+			const auto &[l, _] = value;
+			reverseTransitions[to].emplace_back(l, from);	  // reverse transitions
+		}
+
+		auto DeltaRev = [&reverseTransitions](State i, State j) {
+			return std::views::cartesian_product(reverseTransitions[i], reverseTransitions[j]) |
+				   std::views::filter([](const auto &pair) {
+					   const auto &[t1, t2] = pair;
+					   const auto &[a, _]	= t1;
+					   const auto &[b, _]	= t2;
+					   return a == b;	  // only consider transitions with the same Letter
+				   });
+		};
+
+		std::queue<std::tuple<State, State>> queueRev;
+		for (const auto &q : fst.qFinals) {
+			for (const auto &q2 : fst.qFinals) {
+				queueRev.push({q, q2});
+				coFinals[q * fst.N + q2] = true;	 // mark as co-final
+			}
+		}
+		while (!queueRev.empty()) {
+			auto Q = queueRev.front();
+			queueRev.pop();
+			auto &[q, h] = Q;
+
+			auto Dq = DeltaRev(q, h);
+			for (const auto &[t1, t2] : Dq) {
+				auto &[_, i] = t1;
+				auto &[_, j] = t2;
+				if (coFinals[i * fst.N + j]) continue;
+				coFinals[i * fst.N + j] = true;		// mark as co-final
+				queueRev.push({i, j});
+			}
+		}
+	}
+	int cnt = 0;
+	for (const auto q : coFinals) {
+		if (q) cnt++;
+	}
+	std::cout << "coFinals: " << cnt << " / " << fst.N * fst.N << std::endl;
+
+	auto isCoFinal = [&coFinals, &fst](State i, State j) { return coFinals[i * fst.N + j]; };
+	auto isFinal   = [&fst](State i, State j) { return fst.qFinals.contains(i) && fst.qFinals.contains(j); };
+
+	auto Delta = [&](State i, State j) {
+		auto r1 = fst.Transitions(i);
+		auto r2 = fst.Transitions(j);
+		return std::views::cartesian_product(r1, r2) | std::views::filter([&](const auto &pair) {
+				   const auto &[t1, t2]		 = pair;
+				   const auto &[value1, to1] = t1;
+				   const auto &[value2, to2] = t2;
+				   const auto &[a, _]		 = value1;
+				   const auto &[b, _]		 = value2;
+				   return a == b && isCoFinal(to1, to2);	 // only consider transitions with the same letter
+			   });
+	};
+
+	for (const auto &q : fst.qFirsts) {
+		for (const auto &q2 : fst.qFirsts) {
+			queue.push({q, q2});
+			Adm.insert({{q, q2}, {{}, {}}});
+		}
+	}
+	bool functional = true;
+	while (!queue.empty() && functional) {
+		auto Q		 = queue.front();
+		auto &[q, h] = Q;
+		queue.pop();
+
+		auto &[u, v] = Adm[Q];	   // always computed
+		auto Dq		 = Delta(q, h);
+		for (const auto &[t1, t2] : Dq) {
+			auto &[value1, i] = t1;
+			auto &[value2, j] = t2;
+			auto &[l1, w1]	  = value1;
+			auto &[l2, w2]	  = value2;
+			auto u_			  = m.from(u);
+			auto v_			  = m.from(v);
+			auto uw1		  = m.mul(u_, w1);
+			auto vw2		  = m.mul(v_, w2);
+			auto gcp		  = m.gcp(uw1, vw2);
+			auto h_1		  = m.invMul(gcp, uw1);
+			auto h_2		  = m.invMul(gcp, vw2);
+
+			auto q2 = std::tuple(i, j);
+			functional &= balancible(m, h_1, h_2);
+			functional &= !isFinal(i, j) || (m.size(h_1) == 0 && m.size(h_2) == 0);
+			auto q2_it = Adm.find(q2);
+			functional &= q2_it == Adm.end() ||
+						  (eq(m.gen(h_1), std::get<0>(q2_it->second)) && eq(m.gen(h_2), std::get<1>(q2_it->second)));
+
+			if (functional) {
+				if (q2_it == Adm.end()) {
+					queue.push(q2);
+					Adm.insert({{i, j}, {tovector(m.gen(h_1)), tovector(m.gen(h_2))}});
+				}
+			} else {
+				std::cout << "-> \"" << print_if_can(m, h_1) << "\", \"" << print_if_can(m, h_2) << "\"" << std::endl;
+				std::cout << "len: " << m.size(h_1) << " " << m.size(h_2) << std::endl;
+				std::cout << "balancible: " << balancible(m, h_1, h_2) << std::endl;
+				std::cout << "isFinal: " << isFinal(i, j) << std::endl;
+				std::cout << "Q = (" << q << ", " << h << ")" << std::endl;
+				std::cout << "q2 = (" << std::get<0>(q2) << ", " << std::get<1>(q2) << ")" << std::endl;
+				std::cout << "Adm(" << q << ", " << h << ") = (" << toString(u) << "," << toString(v) << ")"
+						  << ", len1: " << u.size() << ", len2: " << v.size() << std::endl;
+				if (q2_it != Adm.end()) {
+					std::cout << "Adm(" << i << ", " << j << ") = (" << toString(std::get<0>(q2_it->second)) << ","
+							  << toString(std::get<1>(q2_it->second)) << ")" << std::endl;
+				} else {
+					std::cout << "Adm(" << i << ", " << j << ") not found" << std::endl;
+				}
+				std::cout << "cofinal(" << i << ", " << j << ") = " << isCoFinal(i, j) << std::endl;
+				std::cout << "l1: " << l1 << ", l2: " << l2 << std::endl;
+				std::cout << "w1: \"" << print_if_can(m, w1) << "\", w2: \"" << print_if_can(m, w2) << "\""
+						  << std::endl;
+				std::cout << "length1: " << m.size(w1) << ", length2: " << m.size(w2) << std::endl;
+
+				return false;	  // not functional
+			}
+		}
+	}
+
+	return true;
+}
+}	  // namespace fl
+namespace fl {
+namespace cmp {
+template <symbol Letter, free_monoid M>
+using State = typename ExpandedFST<Letter, M>::State;
+template <class Letter>
+using Delay = std::tuple<std::vector<Letter>, std::vector<Letter>>;
+template <class Letter, class State>
+using AdmMap = unordered_set<std::tuple<std::tuple<State, State>, Delay<Letter>>>;
+template <class Letter, class State>
+using AdmElem = AdmMap<Letter, State>::value_type;
+
+template <class Letter, class State>
+struct Cmp {
+	using datatype = std::reference_wrapper<const AdmElem<Letter, State>>;
+	bool operator()(const datatype &a, const datatype &b) const {
+		auto &[q1, delay1] = a.get();
+		auto &[q2, delay2] = b.get();
+		auto &[u1, v1]	   = delay1;
+		auto &[u2, v2]	   = delay2;
+		return u1.size() + v1.size() < u2.size() + v2.size();
+	}
+};
+
+template <class Letter, class State>
+struct Cmp2 {
+	using datatype = std::tuple<State, State, std::reference_wrapper<const Delay<Letter>>>;
+	bool operator()(const datatype &a, const datatype &b) const {
+		auto &[u1, v1] = std::get<2>(a).get();
+		auto &[u2, v2] = std::get<2>(b).get();
+		return u1.size() + v1.size() < u2.size() + v2.size();
+	}
+};
+};	   // namespace cmp
+
+}	  // namespace fl
+
+export namespace fl {
+/// expects trimmed real-time FST
+template <symbol Letter, free_monoid M>
+bool testBoundedVariation(const ExpandedFST<Letter, M> &fst) {
+	// create the squared putput transducer and compute Adm(q) for every state q in it;
+
+	using State = typename ExpandedFST<Letter, M>::State;
+
+	// check output of empty word
+	if (fst.f_eps.size() > 1) return false;
+
+	using Delay	 = std::tuple<std::vector<Letter>, std::vector<Letter>>;
+	using AdmMap = unordered_set<std::tuple<std::tuple<State, State>, Delay>>;
+	AdmMap Adm;
+	using AdmElem = AdmMap::value_type;
+
+	std::priority_queue<std::reference_wrapper<const AdmElem>, std::vector<std::reference_wrapper<const AdmElem>>,
+						cmp::Cmp<Letter, State>>
+		queue;
+
+	const auto				 &m = get<1>(fst.GetMonoid());
+	std::vector<unsigned int> longestDelay(fst.N * fst.N, 0);
+
+	auto Delta = [&](State i, State j) {
+		auto r1 = fst.Transitions(i);
+		auto r2 = fst.Transitions(j);
+		return std::views::cartesian_product(r1, r2) | std::views::filter([&](const auto &pair) {
+				   const auto &[t1, t2]		 = pair;
+				   const auto &[value1, to1] = t1;
+				   const auto &[value2, to2] = t2;
+				   const auto &[a, _]		 = value1;
+				   const auto &[b, _]		 = value2;
+				   return a == b;
+			   });
+	};
+
+	for (auto &q : fst.qFirsts) {
+		for (auto &q2 : fst.qFirsts) {
+			auto [it, b] = Adm.insert({{q, q2}, {{}, {}}});
+			if (b) [[likely]]
+				queue.emplace(std::ref(*it));
+		}
+	}
+
+	unsigned int C		   = get<1>(fst.GetMonoid()).C();
+	auto		 MAX_DELAY = C * fst.N * fst.N;		// C * |Q|^2
+	auto		 curr_max  = 0u;
+
+	std::cout << "C = " << C << ", MAX_DELAY = " << MAX_DELAY << std::endl;
+
+	bool boundedVariation = true;
+
+	using namespace std::chrono_literals;
+	SlowDown3 sd(100ms);
+	while (!queue.empty() && boundedVariation) {
+		auto Q			   = queue.top();
+		auto &[q_1, delay] = Q.get();
+		auto &[q, h]	   = q_1;
+		queue.pop();
+
+		auto &[u, v] = delay;
+		auto Dq		 = Delta(q, h);
+		for (const auto &[t1, t2] : Dq) {
+			auto &[value1, i] = t1;
+			auto &[value2, j] = t2;
+			auto &[l1, w1]	  = value1;
+			auto &[l2, w2]	  = value2;
+			auto u_			  = m.from(u);
+			auto v_			  = m.from(v);
+			auto uw1		  = m.mul(u_, w1);
+			auto vw2		  = m.mul(v_, w2);
+			auto gcp		  = m.gcp(uw1, vw2);
+			auto h_1		  = m.invMul(gcp, uw1);
+			auto h_2		  = m.invMul(gcp, vw2);
+			auto q2			  = std::tuple(i, j);
+
+			auto h_1_size = m.size(h_1);
+			auto h_2_size = m.size(h_2);
+
+			boundedVariation &= h_1_size < MAX_DELAY && h_2_size < MAX_DELAY;
+			curr_max = std::max<unsigned int>(curr_max, h_1_size);
+			curr_max = std::max<unsigned int>(curr_max, h_2_size);
+
+			auto &longest = longestDelay[i * fst.N + j];
+			if (longest > h_1_size && longest > h_2_size) { continue; }
+
+			longest = std::max<unsigned int>(longest, h_1_size);
+			longest = std::max<unsigned int>(longest, h_2_size);
+
+			sd.do_thing([&]() {
+				std::cout << "\rCurrent max delay: " << curr_max;
+				std::cout << " Adm size: " << Adm.size() << " Delay upper bound: " << MAX_DELAY;
+				std::cout << " queue size: " << queue.size() << std::flush;
+			});
+
+			if (boundedVariation) {
+				auto [inserted_it, b] = Adm.insert({{i, j}, {tovector(m.gen(h_1)), tovector(m.gen(h_2))}});
+				if (b) [[likely]]
+					queue.emplace(std::ref(*inserted_it));
+
+			} else return false;
+		}
+	}
+
+	std::cout << "\rCurrent max delay: " << curr_max;
+	std::cout << " Adm size: " << Adm.size() << " Delay upper bound: " << MAX_DELAY;
+	std::cout << " queue size: " << queue.size() << std::flush;
+	std::cout << "\n\n" << std::flush;
+
+	return true;
+}
+}	  // namespace fl

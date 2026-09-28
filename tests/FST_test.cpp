@@ -1,14 +1,8 @@
-#include <iostream>
+import formlang;
 
-#include <FST.hpp>
-#include <ExpandedFST.hpp>
-#include <ambiguity.hpp>
-#include <functionality.hpp>
-#include <letter.hpp>
-#include <regexParser.hpp>
-#include <utils.h>
-#include <SSFT.hpp>
-#include <concepts.hpp>
+#include <iostream>
+#include <chrono>
+#include "utils_macros.hpp"
 
 using namespace fl;
 
@@ -101,8 +95,8 @@ void test_replace() {
 	// fsa.print(std::cout);
 	// drawFSA(fst);
 
-	fst = removeEpsilonFST<Letter>(std::move(fst));
-	fst = trimFSA<Letter>(std::move(fst));
+	fst = removeEpsilonFST(std::move(fst));
+	fst = trimFSA(std::move(fst));
 
 	if (!testInfiniteAmbiguity(fst)) {
 		std::cout << "FSA is not infinitely ambiguous." << std::endl;

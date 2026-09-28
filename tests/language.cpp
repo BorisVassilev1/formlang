@@ -1,7 +1,5 @@
-#include "OutputFSA.hpp"
-#include "SSFT.hpp"
-#include "lex_traverser.hpp"
-#include "wordset.hpp"
+import formlang;
+
 #include <cassert>
 #include <cctype>
 #include <cstring>
@@ -10,13 +8,10 @@
 #include <memory>
 #include <ostream>
 #include <string_view>
-
-#include <parser.h>
-#include <cfg.h>
-#include <utils.h>
-#include <token.h>
-#include <earley.hpp>
-#include <grammar_factory.hpp>
+#include <climits>
+#include <iostream>
+#include <chrono>
+#include "utils_macros.hpp"
 
 using namespace fl;
 
