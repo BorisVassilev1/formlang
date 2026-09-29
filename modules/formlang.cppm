@@ -33,3 +33,4 @@ export import :lex_traverser;
 export import :functionality;
 export import :ssft;
 export import :output_fsa;
+export import :canonical;

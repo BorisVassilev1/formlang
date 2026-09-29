@@ -295,10 +295,7 @@ class SparseSSFST {
 	[[clang::always_inline]] inline const auto			&Final() const { return qFinals; }
 	[[clang::always_inline]] inline bool				 IsFinal(State s) const { return qFinals.contains(s); }
 
-	[[clang::always_inline]] inline OutputMonoid::Value Psi(State s) const {
-		if (!qFinals.contains(s)) return get<1>(monoid).identity;
-		return output.at(s);
-	}
+	[[clang::always_inline]] inline OutputMonoid::Value Psi(State s) const { return output.at(s); }
 
 	[[clang::always_inline]] inline std::optional<std::tuple<OutValue, State>> Transition(
 		State s, typename get_input_t<Monoid>::Symbol l) const {

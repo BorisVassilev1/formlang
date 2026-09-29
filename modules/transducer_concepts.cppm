@@ -32,6 +32,14 @@ concept FSA = monoid<typename T::Monoid> && state<typename T::State> && requires
 };
 
 template <class T>
+concept FSA_builder = FSA<T> && requires(T t, typename T::State s, typename T::Monoid::Value v) {
+	{ t.NewState() } -> std::same_as<typename T::State>;
+	{ t.AddTransition(s, v, s) } -> std::same_as<void>;
+	{ t.AddInitial(s) } -> std::same_as<void>;
+	{ t.AddFinal(s) } -> std::same_as<void>;
+};
+
+template <class T>
 concept FSA_with_arcs = FSA<T> && requires(T t, typename T::State s, typename T::Monoid::Value v) {
 	{ T::sorted_arcs } -> std::convertible_to<bool>;	 // are arcs comparable as arrays
 	// sorted or not, deterministic or not, the transitions are always a range of tuples (Value, State)
@@ -103,7 +111,7 @@ concept SSFST =		//
 	FST<T> &&		//
 	requires(T t, typename T::State s, typename get_input_t<T>::Symbol l) {
 		{ T::deterministic == true };
-		{ t.Psi(s) } -> std::convertible_to<typename get_output_t<T>::Value>;
+		{ t.Psi(s) } -> std::convertible_to<std::optional<typename get_output_t<T>::Value>>;
 	};
 
 template <class T>

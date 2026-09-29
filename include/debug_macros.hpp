@@ -1,11 +1,5 @@
 #pragma once
 
-// Macros can't be exported from a C++20 module interface, so the dbLog/dbLogR
-// logging macros (originally part of debug.hpp) live here as a plain header.
-// Consumers that need them must #include this directly, in addition to
-// `import formlang;` for the dbg:: names (f_dbLog, log_colors, LOG_*) they
-// expand into.
-
 #define COLOR_RESET	 "\033[0m"
 #define COLOR_RED	 "\x1B[0;91m"
 #define COLOR_GREEN	 "\x1B[0;92m"
