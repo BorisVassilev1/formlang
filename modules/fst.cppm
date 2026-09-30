@@ -28,7 +28,7 @@ export namespace fl {
 
 // Classical Finite State Transducer (FST) class template
 //
-template <free_monoid I, monoid M>
+template <monoid I, monoid M>
 class SparseFST {
    public:
 	constexpr static bool deterministic = false;

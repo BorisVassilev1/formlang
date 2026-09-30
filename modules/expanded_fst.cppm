@@ -6,8 +6,10 @@ module;
 #include <unordered_set>
 #include <algorithm>
 #include <cassert>
+#include <ostream>
 #include <ranges>
 #include <stack>
+#include <vector>
 
 export module formlang:expanded_fst;
 
@@ -46,14 +48,14 @@ class ExpandedFST {
 	Monoid monoid;	   // owns the (trivial) input-symbol tape and the output tape's pool
 	Map	   transitions;
 
-	// the set  of (epslon, x) \in the relation
-	std::unordered_set<OutValue, monoid_hash<OutputMonoid>, monoid_equal<OutputMonoid>> f_eps{};
+	// the set of (epsilon, x) \in the relation. A plain vector, content-deduplicated by
+	// addFEps() below -- kept small in practice, and (unlike unordered_set) its elements
+	// can be renumbered in place by InterningMonoid::compact().
+	std::vector<OutValue> f_eps{};
 
 	constexpr ExpandedFST()
 		requires(std::is_default_constructible_v<Monoid>)
-		: N(0),
-		  monoid(),
-		  f_eps(0, monoid_hash<OutputMonoid>(&get<1>(monoid)), monoid_equal<OutputMonoid>(&get<1>(monoid))) {}
+		: N(0), monoid() {}
 
 	constexpr ExpandedFST(const ExpandedFST &)			  = default;
 	constexpr ExpandedFST(ExpandedFST &&)				  = default;
@@ -86,7 +88,7 @@ class ExpandedFST {
 		for (const auto &existing : f_eps) {
 			if (get<1>(monoid).equal(existing, v)) return;
 		}
-		f_eps.emplace(std::move(v));
+		f_eps.push_back(std::move(v));
 	}
 
 	void print(std::ostream &out) const {
@@ -133,18 +135,17 @@ class ExpandedFST {
 	}
 };
 
-/// view of only the monoid elements
+/// mutable view of the output-tape value carried by every transition. The input tape
+/// (always a plain SymbolMonoid, never pooled) is never what compact() needs to touch --
+/// only the output tape's InterningMonoid is ever compactable here -- so this projects
+/// straight down to it, letting callers hand it directly to the output monoid's compact()
+/// alongside f_eps (see the call sites below), rather than going through
+/// SharedCartesianMonoid::compact()'s generic per-tape dispatch.
 template <class Map>
-auto transitionValues(const Map &transitions) {
-	return transitions | std::views::values |
-		   std::views::transform([](const auto &labelAndTo) { return std::get<0>(labelAndTo); });
-}
-
-/// view of only the monoid elements
-template <symbol Symbol, monoid M>
-auto fEpsAsValues(const ExpandedFST<Symbol, M> &fsa) {
-	using Value = typename ExpandedFST<Symbol, M>::Value;
-	return fsa.f_eps | std::views::transform([](const auto &v) { return Value(Symbol::eps, v); });
+auto transitionValues(Map &transitions) {
+	return transitions | std::views::values | std::views::transform([](auto &labelAndTo) -> auto & {
+			   return std::get<1>(std::get<0>(labelAndTo));
+		   });
 }
 
 /// expands the transducer. in the case where output is longer than input,
@@ -295,7 +296,7 @@ auto removeUpperEpsilonFST(ExpandedFST<Symbol, M> &&fsa) {
 	// reference to some pool entries (e.g. the output word carried along a
 	// now-removed epsilon hop) -- reclaim them.
 	if constexpr (compactable_monoid<typename FSA_t::Monoid>) {
-		fsa.monoid.compact(transitionValues(fsa.transitions), fEpsAsValues(fsa));
+		get<1>(fsa.monoid).compact(transitionValues(fsa.transitions), fsa.f_eps);
 	}
 
 	return std::move(fsa);
@@ -311,7 +312,7 @@ auto trimFSA(ExpandedFST<Symbol, M> &&fsa) {
 		fsa.N		= 0;
 		fsa.qFirsts = {0};
 		fsa.transitions.clear();
-		if constexpr (compactable_monoid<Monoid>) { fsa.monoid.compact(fEpsAsValues(fsa)); }
+		if constexpr (compactable_monoid<Monoid>) { get<1>(fsa.monoid).compact(fsa.f_eps); }
 		return std::move(fsa);
 	}
 
@@ -373,7 +374,7 @@ auto trimFSA(ExpandedFST<Symbol, M> &&fsa) {
 
 	if (cnt == fsa.N) {
 		if constexpr (compactable_monoid<Monoid>) {
-			fsa.monoid.compact(transitionValues(fsa.transitions), fEpsAsValues(fsa));
+			get<1>(fsa.monoid).compact(transitionValues(fsa.transitions), fsa.f_eps);
 		}
 		return std::move(fsa);
 	}
@@ -401,7 +402,7 @@ auto trimFSA(ExpandedFST<Symbol, M> &&fsa) {
 	}
 
 	if constexpr (compactable_monoid<Monoid>) {
-		new_fsa.monoid.compact(transitionValues(new_fsa.transitions), fEpsAsValues(new_fsa));
+		get<1>(new_fsa.monoid).compact(transitionValues(new_fsa.transitions), new_fsa.f_eps);
 	}
 
 	return std::move(new_fsa);
@@ -489,7 +490,7 @@ auto pseudoDeterminizeFST(const T &fst) {
 	// fst.Initial() (the BFS over `queue`) -- pool entries that were only
 	// referenced by transitions out of unreached states are now dead.
 	if constexpr (compactable_monoid<Monoid>) {
-		dfa.monoid.compact(transitionValues(dfa.transitions), fEpsAsValues(dfa));
+		get<1>(dfa.monoid).compact(transitionValues(dfa.transitions), dfa.f_eps);
 	}
 
 	return dfa;
@@ -524,7 +525,7 @@ auto reverseFST(const T &fst) {
 	}
 
 	if constexpr (compactable_monoid<typename FSA_t::Monoid>) {
-		rev.monoid.compact(transitionValues(rev.transitions), fEpsAsValues(rev));
+		get<1>(rev.monoid).compact(transitionValues(rev.transitions), rev.f_eps);
 	}
 
 	return rev;

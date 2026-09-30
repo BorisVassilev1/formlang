@@ -1,12 +1,10 @@
 module;
 
 #include <cstddef>
-#include <span>
-#include <string_view>
-#include <vector>
-#include <iomanip>
+#include <ranges>
 #include <ostream>
 #include <format>
+#include <ranges>
 
 export module formlang:letter;
 
@@ -20,7 +18,7 @@ export namespace fl {
  *
  */
 class Letter {
-	char val = 0;
+	unsigned char val = 0;
 
    public:
 	constexpr Letter(char val) : val(val) {}
@@ -34,12 +32,11 @@ class Letter {
 	static const Letter eof;
 	static const size_t size;
 
-	constexpr Letter operator++() {
-		++val;
-		return *this;
-	}
-
 	void debug_print(std::ostream &out) const;
+
+	static auto all() {
+		return std::views::iota(0u, size) | std::views::transform([](size_t i) { return Letter((char)i); });
+	}
 };
 
 constexpr const Letter Letter::eps	= '\xFF';

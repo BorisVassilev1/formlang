@@ -49,6 +49,7 @@ class IntegerMonoid {
 	}
 
 	constexpr Value p(Value a) const { return a; }
+	constexpr Value widen(Value a) const { return a; }
 
 	// IntegerMonoid holds no state of its own -- Value is self-contained, so
 	// there's nothing to write/read here. Exists only so IntegerMonoid

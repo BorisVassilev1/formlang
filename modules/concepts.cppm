@@ -13,6 +13,9 @@ export module formlang:concepts;
 
 export namespace fl {
 
+template <class R, class T>
+concept range_of = std::ranges::forward_range<R> && std::same_as<std::ranges::range_value_t<R>, T>;
+
 /// a concept for classes that can be Symbol in a DPDA<State, Symbol>
 template <class S>
 concept symbol = requires() {
@@ -20,9 +23,9 @@ concept symbol = requires() {
 	{ S::eof } -> std::same_as<const S &>;
 	{ S::size } -> std::convertible_to<const std::size_t &>;
 	{ S() } -> std::same_as<S>;
-	{ ++std::declval<S &>() } -> std::same_as<S>;
-	std::is_convertible_v<S, std::size_t>;
+	{ std::size_t(S{}) } -> std::convertible_to<std::size_t>;
 	not std::is_fundamental_v<S>;
+	{ S::all() } -> range_of<S>;
 };
 
 template <class S>
@@ -82,6 +85,8 @@ concept monoid = requires(const M &m, const M::Value &a, const M::Value &b) {
 	{ m.mul(a, b) } -> std::convertible_to<typename M::Value>;
 	{ m.invMul(a, b) } -> std::convertible_to<typename M::Value>;
 	{ m.own(m, a) } -> std::convertible_to<typename M::Value>;	   // copy a value from another monoid
+
+	{ m.widen(a) } -> std::convertible_to<typename M::Value>;	  // optional widen to an intermediate non-Value type
 };
 
 template <class M>
@@ -102,9 +107,6 @@ auto print_if_can(const auto &m, const auto &a) {
 	}
 }
 
-template <class R, class T>
-concept range_of = std::ranges::forward_range<R> && std::same_as<std::ranges::range_value_t<R>, T>;
-
 template <class M>
 concept free_monoid = monoid<M> && requires(const M &m, const M::Value &a) {
 	typename M::Symbol;
@@ -117,9 +119,10 @@ concept free_monoid = monoid<M> && requires(const M &m, const M::Value &a) {
 	{ m.C() } -> std::convertible_to<std::size_t>;	   /// the longest word in the monoid TODO: bad??
 };
 
-/// for monoids that pool their valuesconcept
+/// for monoids that pool their values. compact() renumbers surviving values and writes
+/// their new ids back into the given ranges, so those ranges must be mutable.
 template <class M>
-concept compactable_monoid = monoid<M> && requires(const M &m, const std::vector<typename M::Value> &live) {
+concept compactable_monoid = monoid<M> && requires(const M &m, std::vector<typename M::Value> &live) {
 	// this should be variadic
 	{ m.compact(live) } -> std::same_as<void>;
 	{ m.compact(live, live) } -> std::same_as<void>;

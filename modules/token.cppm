@@ -4,7 +4,7 @@ module;
 #include <ostream>
 #include <unordered_map>
 #include <format>
-#include <memory>
+#include <ranges>
 #include <string>
 
 #include "token_macros.hpp"
@@ -113,17 +113,16 @@ struct Token {
 		out << it->second;
 	}
 
-	Token operator++() {
-		++value;
-		return *this;
-	}
-
 	uint8_t *getData() { return data; }
 	template <typename T>
 		requires(sizeof(T) <= sizeof(uint8_t *))
 	auto &setData(const T &val) {
 		data = (uint8_t *)val;
 		return *this;
+	}
+
+	static auto all() {
+		return std::views::iota(0u, size) | std::views::transform([](size_t i) { return Token(i); });
 	}
 };
 

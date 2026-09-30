@@ -59,6 +59,28 @@ class SparseSSFST {
 	using BigState			 = std::vector<std::tuple<State, typename M::Value>>;
 	using IntermediateStates = std::vector<std::reference_wrapper<const BigState>>;
 
+	// NOTE: comparing std::tuple<State, Value> field-by-field by hand here rather than relying
+	// on std::tuple's own operator< / operator<=> -- under this toolchain (clang 22 + a
+	// bleeding-edge libstdc++) importing this module corrupts the synthesized tuple ordering
+	// (it can report neither a<b nor b<a for tuples that clearly differ in their first element),
+	// even though operator== and the element types' own operator< are unaffected. Symptom if this
+	// regresses: the subset construction below silently merges distinct BigStates, collapsing the
+	// SSFST to far too few states/transitions and rejecting input it should accept.
+	static bool stateEntryLess(const std::tuple<State, typename M::Value> &a,
+							   const std::tuple<State, typename M::Value> &b) {
+		if (std::get<0>(a) != std::get<0>(b)) return std::get<0>(a) < std::get<0>(b);
+		return std::get<1>(a) < std::get<1>(b);
+	}
+	static bool stateEntryEqual(const std::tuple<State, typename M::Value> &a,
+								const std::tuple<State, typename M::Value> &b) {
+		return std::get<0>(a) == std::get<0>(b) && std::get<1>(a) == std::get<1>(b);
+	}
+	struct BigStateLess {
+		bool operator()(const BigState &a, const BigState &b) const {
+			return std::lexicographical_compare(a.begin(), a.end(), b.begin(), b.end(), stateEntryLess);
+		}
+	};
+
 	void printIntermediate(const IntermediateStates &states, std::ostream &out) const {
 		out << "digraph SparseSSFST {\n";
 		out << "  rankdir=LR;\n";
@@ -113,7 +135,7 @@ class SparseSSFST {
 		const auto &output	   = get<1>(monoid);
 
 		std::vector<std::reference_wrapper<const BigState>> states;		// states of the SSFST
-		std::map<BigState, State> stateMap;								// maps sets of states to index in states vector
+		std::map<BigState, State, BigStateLess> stateMap;					// maps sets of states to index in states vector
 
 		State			  nextState = 0;
 		const auto		  newState	= [&nextState]() -> State { return nextState++; };
@@ -128,7 +150,7 @@ class SparseSSFST {
 			initial.push_back({q, output.identity});
 			if (fsa.qFinals.contains(q)) { qFinals.insert(0); }
 		}
-		std::sort(initial.begin(), initial.end());
+		std::sort(initial.begin(), initial.end(), stateEntryLess);
 		auto [it, _] = stateMap.insert({std::move(initial), 0});
 		states.emplace_back(it->first);		// add the initial state
 		queue.push(newState());
@@ -202,8 +224,8 @@ class SparseSSFST {
 			std::vector<int> stateRemap(nextStates.size(), -1);
 			for (const auto &[i, nextState] : std::views::enumerate(nextStates)) {
 				// sort and remove duplicates for uniqueness
-				std::sort(nextState.begin(), nextState.end());
-				nextState.erase(std::unique(nextState.begin(), nextState.end()), nextState.end());
+				std::sort(nextState.begin(), nextState.end(), stateEntryLess);
+				nextState.erase(std::unique(nextState.begin(), nextState.end(), stateEntryEqual), nextState.end());
 
 				// check if the next state is already in the states vector
 				auto it = stateMap.find(nextState);

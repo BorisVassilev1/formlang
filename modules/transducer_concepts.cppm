@@ -34,7 +34,11 @@ concept FSA = monoid<typename T::Monoid> && state<typename T::State> && requires
 template <class T>
 concept FSA_builder = FSA<T> && requires(T t, typename T::State s, typename T::Monoid::Value v) {
 	{ t.NewState() } -> std::same_as<typename T::State>;
-	{ t.AddTransition(s, v, s) } -> std::same_as<void>;
+	{ t.AddTransition(s, v, s) };
+	//{ get<0>(t.AddTransition(s, v, s)) } -> std::same_as<bool>;
+	//{
+	//	*get<1>(t.AddTransition(s, v, s))
+	//} -> std::same_as<std::tuple<typename T::State, typename T::Monoid::Value, typename T::State>>;
 	{ t.AddInitial(s) } -> std::same_as<void>;
 	{ t.AddFinal(s) } -> std::same_as<void>;
 };

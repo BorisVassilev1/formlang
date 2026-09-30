@@ -190,7 +190,7 @@ class ReplaceWithMarkerSSFT : public TotalSSFST<Symbol, alphabetSize, InterningM
 	}
 
 	void fillFailTransitions(State initial, State trieStart, TemporaryData &tempData) {
-		for (Symbol l = 0; l < Symbol::size; ++l) {
+		for (Symbol l : Symbol::all()) {
 			if (l == marker) continue;
 			// self-loop for all letters except marker
 			transitions[initial][size_t(l)] = {get<1>(monoid).from(std::span<const Symbol>{&l, 1}), initial};
@@ -208,7 +208,7 @@ class ReplaceWithMarkerSSFT : public TotalSSFST<Symbol, alphabetSize, InterningM
 			visited[state] = true;
 			assert(fail[state] != -1u);
 
-			for (Symbol l = 0; l < Symbol::size; ++l) {
+			for (Symbol l : Symbol::all()) {
 				const auto &[outputID, next] = transitions[state][size_t(l)];
 				if (next != -1u) {
 					bfsQueue.push(next);
@@ -389,7 +389,7 @@ class ReplaceWithMarkerSSFT : public TotalSSFST<Symbol, alphabetSize, InterningM
 			}
 			out << "\"];\n";	 // final States with output
 
-			for (Symbol l = 0; l < Symbol::size; ++l) {
+			for (Symbol l : Symbol::all()) {
 				const auto &[outputID, next] = transitions[s][size_t(l)];
 				if (next != -1u) {
 					out << "  " << s << " -> " << next << " [label=\"<" << l << ", ";
@@ -401,7 +401,7 @@ class ReplaceWithMarkerSSFT : public TotalSSFST<Symbol, alphabetSize, InterningM
 		// add the unminimized states
 		for (State s = 0; s < tempData.unminimizedStates.size(); ++s) {
 			out << "  " << N + s << " [shape=circle, style=dashed];\n";
-			for (Symbol l = 0; l < Symbol::size; ++l) {
+			for (Symbol l : Symbol::all()) {
 				const auto &[outputID, next] = tempData.unminimizedStates[s][size_t(l)];
 				if (next != -1u) {
 					out << "  " << N + s << " -> " << (next < N ? next : N + next - N) << " [label=\"<" << l << ", ";

@@ -11,6 +11,12 @@ export module formlang:dbg;
 
 export namespace dbg {
 
+#ifndef _NDEBUG
+constexpr bool enabled = true;
+#else
+constexpr bool enabled = false;
+#endif
+
 template <class T>
 auto type_name() {
 	typedef typename std::remove_reference<T>::type TR;

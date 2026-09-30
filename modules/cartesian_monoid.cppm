@@ -8,6 +8,7 @@ module;
 #include <type_traits>
 #include <utility>
 #include <ranges>
+#include <iterator>
 #include <format>
 
 export module formlang:cartesian_monoid;
@@ -103,6 +104,11 @@ class SharedCartesianMonoid<std::tuple<OwnedTs...>, Slots...> : public Cartesian
 		return std::tuple(std::get<slots[Is]>(owned).gcp(std::get<Is>(a), std::get<Is>(b))...);
 	}
 
+	template <std::size_t... Is>
+	constexpr auto widenImpl(auto a, std::index_sequence<Is...>) const {
+		return std::tuple(std::get<slots[Is]>(owned).widen(std::get<Is>(a))...);
+	}
+
 	// const, matching InterningMonoid::compact() const: the owned monoids
 	// mutate their own pools through their own `mutable` members, same as
 	// InterningMonoid does, so this doesn't need non-const access to `owned`
@@ -117,26 +123,27 @@ class SharedCartesianMonoid<std::tuple<OwnedTs...>, Slots...> : public Cartesian
 	// have each call reclaim the other tape(s)' still-live entries out from
 	// under it.
 	template <std::size_t J, std::size_t I>
-	constexpr auto projectTapeIfOwned(const auto &...liveRanges) const {
+	constexpr auto projectTapeIfOwned(auto &...liveRanges) const {
 		if constexpr (slots[I] == J) {
-			return std::make_tuple(std::views::transform(liveRanges, [](const Value &v) { return std::get<I>(v); })...);
+			return std::make_tuple(
+				std::views::transform(liveRanges, [](Value &v) -> auto & { return std::get<I>(v); })...);
 		} else {
 			return std::tuple<>{};
 		}
 	}
 
 	template <std::size_t J, std::size_t... Is>
-	void compactOwned(std::index_sequence<Is...>, const auto &...liveRanges) const {
+	void compactOwned(std::index_sequence<Is...>, auto &...liveRanges) const {
 		if constexpr (fl::compactable_monoid<ElemAt<J>>) {
 			auto allRanges = std::tuple_cat(projectTapeIfOwned<J, Is>(liveRanges...)...);
 			if constexpr (std::tuple_size_v<decltype(allRanges)> > 0) {
-				std::apply([&](const auto &...ranges) { std::get<J>(owned).compact(ranges...); }, allRanges);
+				std::apply([&](auto &...ranges) { std::get<J>(owned).compact(ranges...); }, allRanges);
 			}
 		}
 	}
 
 	template <std::size_t... Js>
-	void compactImpl(std::index_sequence<Js...>, const auto &...liveRanges) const {
+	void compactImpl(std::index_sequence<Js...>, auto &...liveRanges) const {
 		(compactOwned<Js>(std::make_index_sequence<NumTapes>{}, liveRanges...), ...);
 	}
 
@@ -182,10 +189,16 @@ class SharedCartesianMonoid<std::tuple<OwnedTs...>, Slots...> : public Cartesian
 	}
 
 	constexpr auto gcp(auto a, auto b) const { return gcpImpl(a, b, std::make_index_sequence<NumTapes>{}); }
+	constexpr auto widen(auto a) const { return widenImpl(a, std::make_index_sequence<NumTapes>{}); }
 
-	// tries to compact all owned monoids
-	template <std::ranges::input_range... Ranges>
-		requires((fl::range_of<Ranges, Value> && ...) && (fl::compactable_monoid<OwnedTs> || ...))
+	// tries to compact all owned monoids. Renumbers ids on every tape backed by a
+	// compactable monoid, writing the new ids back into the given ranges -- see
+	// InterningMonoid::compact().
+	template <std::ranges::forward_range... Ranges>
+		requires((std::same_as<std::ranges::range_value_t<Ranges>, Value> &&
+				  std::indirectly_writable<std::ranges::iterator_t<Ranges>, Value>) &&
+				 ...) &&
+				(fl::compactable_monoid<OwnedTs> || ...)
 	void compact(Ranges &&...liveRanges) const {
 		compactImpl(std::make_index_sequence<sizeof...(OwnedTs)>{}, liveRanges...);
 	}

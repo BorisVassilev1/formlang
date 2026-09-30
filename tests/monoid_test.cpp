@@ -651,6 +651,86 @@ TEST_SUITE("InterningMonoid / scale") {
 }
 
 // ---------------------------------------------------------------------------
+// compact()
+// ---------------------------------------------------------------------------
+
+TEST_SUITE("InterningMonoid / compact") {
+
+	TEST_CASE("dead words are reclaimed and live words keep their content") {
+		M  m;
+		Id a	= m.from("ab");
+		Id dead = m.from("some word that is not passed to compact");
+		Id c	= m.from("cd");
+		(void)dead;
+
+		REQUIRE(m.totalWordCount() == 4);	  // identity, ab, dead, cd
+
+		std::vector<Id> live{a, c};
+		m.compact(live);
+
+		CHECK(m.totalWordCount() == 3);	// identity, ab, cd
+		CHECK(word(m, live[0]) == "ab");
+		CHECK(word(m, live[1]) == "cd");
+	}
+
+	TEST_CASE("surviving ids are renumbered into a dense space") {
+		M  m;
+		Id a	= m.from("aa");
+		Id dead = m.from("bb");	   // sits between a and c -- dropping it must leave a gap
+		Id c	= m.from("cc");
+
+		std::vector<Id> live{a, c};
+		m.compact(live);
+
+		// with the gap left by `dead` closed, `cc`'s new id must land exactly where
+		// `dead`'s old (now-reclaimed) id used to be -- i.e. no dead ids are skipped
+		// over, and nothing is left dangling in wordsData.
+		CHECK(live[1] == dead);
+		CHECK(word(m, live[0]) == "aa");
+		CHECK(word(m, live[1]) == "cc");
+	}
+
+	TEST_CASE("the empty word survives even when not listed as live") {
+		M				m;
+		Id				a = m.from("ab");
+		std::vector<Id> live{a};
+		m.compact(live);
+		CHECK(word(m, M::identity) == "");
+	}
+
+	TEST_CASE("multiple ranges are treated as one combined liveness set") {
+		M  m;
+		Id a	= m.from("ab");
+		Id b	= m.from("cd");
+		Id dead = m.from("ef");
+		(void)dead;
+
+		std::vector<Id> live1{a};
+		std::vector<Id> live2{b};
+		m.compact(live1, live2);
+
+		CHECK(m.totalWordCount() == 3);	// identity, ab, cd
+		CHECK(word(m, live1[0]) == "ab");
+		CHECK(word(m, live2[0]) == "cd");
+	}
+
+	TEST_CASE("compacting reclaims the byte buffer of dropped words") {
+		M  m;
+		Id a	= m.from("ab");
+		Id dead = m.from("a word long enough to make the pool shrink once it is gone");
+		(void)dead;
+
+		auto before = m.poolByteCount();
+
+		std::vector<Id> live{a};
+		m.compact(live);
+
+		CHECK(m.poolByteCount() < before);
+		CHECK(word(m, live[0]) == "ab");
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Other symbol types
 // ---------------------------------------------------------------------------
 

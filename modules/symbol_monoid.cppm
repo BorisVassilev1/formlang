@@ -99,6 +99,7 @@ class SymbolMonoid : eps_holder<_Symbol> {
 	constexpr std::size_t C() const { return 1; }
 
 	constexpr Value p(Value a) const { return a; }
+	constexpr Value widen(Value a) const { return a; }
 
 	SymbolMonoid() = default;
 };

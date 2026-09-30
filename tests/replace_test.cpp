@@ -1,8 +1,8 @@
 import formlang;
 
 #include <iostream>
-#include <compare>
 #include <vector>
+#include <ranges>
 
 class MySymbol {
    public:
@@ -22,7 +22,7 @@ class MySymbol {
 
 	constexpr auto operator<=>(std::size_t other) const { return (size_t)value <=> other; }
 	constexpr auto operator<=>(const MySymbol &other) const = default;
-	constexpr bool	operator==(const MySymbol &other) const { return value == other.value; }
+	constexpr bool operator==(const MySymbol &other) const { return value == other.value; }
 
 	constexpr static size_t size = 5;
 	const static MySymbol	eps;
@@ -49,6 +49,10 @@ class MySymbol {
 	const static MySymbol c;
 	const static MySymbol d;
 	const static MySymbol _;
+
+	static auto all() {
+		return std::views::iota(0u, size) | std::views::transform([](size_t i) { return MySymbol((char)i); });
+	}
 };
 
 constexpr inline MySymbol MySymbol::eps = {5};

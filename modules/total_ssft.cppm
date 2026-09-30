@@ -91,7 +91,7 @@ class TotalSSFST {
 	}
 
 	[[clang::always_inline]] inline auto Transitions() const {
-		return std::views::iota(0u, N * alphabetSize) | std::views::transform([this](std::size_t i) {
+		return std::views::iota(size_t(0), size_t(N * alphabetSize)) | std::views::transform([this](std::size_t i) {
 				   State  s						= i / alphabetSize;
 				   Symbol l						= Symbol(i % alphabetSize);
 				   const auto &[outputID, next] = transitions[s][size_t(l)];
@@ -170,7 +170,7 @@ class TotalSSFST {
 				out << "\"];\n";								 // final States with output
 			} else out << "  " << s << " [shape=circle];\n";	 // final States
 
-			for (Symbol l = 0; l < Symbol::size; ++l) {
+			for (Symbol l : Symbol::all()) {
 				const auto &[outputID, next] = transitions[s][size_t(l)];
 				if (next != -1u) {
 					out << "  " << s << " -> " << next << " [label=\"<" << l << ", ";
