@@ -16,20 +16,13 @@ set(COMPILE_ARGS
 	#-g -fsanitize=address
 )
 
-file(GLOB LANG_MODULES "modules/*.cppm")
+file(GLOB LANG_SOURCES "src/*.cpp")
 
-add_library(lang STATIC)
-target_sources(lang
-	PUBLIC
-		FILE_SET CXX_MODULES
-		BASE_DIRS modules
-		FILES ${LANG_MODULES}
-)
+add_library(lang STATIC ${LANG_SOURCES})
+
 target_compile_options(lang PRIVATE ${COMPILE_ARGS})
 target_link_options(lang PRIVATE ${COMPILE_ARGS})
-# only the macro-only headers (dbLog/BENCH/CREATE_TOKEN_CONSTEXPR) remain here;
-# macros can't be exported from a module, so consumers that need them #include
-# this directory directly alongside `import formlang;`
+
 target_include_directories(lang PUBLIC include)
 set_target_properties(lang PROPERTIES
 	RUNTIME_OUTPUT_DIRECTORY ../

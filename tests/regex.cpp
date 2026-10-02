@@ -1,10 +1,16 @@
-import formlang;
-
 #include <cstring>
 #include <fstream>
 #include <iostream>
 #include <chrono>
+
+#include "ambiguity.hpp"
+#include "fst_from_regex.hpp"
+#include "functionality.hpp"
+#include "letter.hpp"
+#include "ssft.hpp"
 #include "utils_macros.hpp"
+#include "regex_parser.hpp"
+#include "expanded_fst.hpp"
 
 using namespace fl;
 

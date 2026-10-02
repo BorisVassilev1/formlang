@@ -1,7 +1,9 @@
-import formlang;
 #include <cassert>
 #include <cstdlib>
 #include <ctime>
+
+#include "cfg.hpp"
+#include "letter.hpp"
 
 int main() {
 	fl::CFG<fl::Letter> g;

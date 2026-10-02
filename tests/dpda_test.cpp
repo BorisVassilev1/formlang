@@ -1,12 +1,13 @@
-import formlang;
-
 #include <iostream>
 #include <fstream>
-#include <unordered_set>
-#include <memory>
 
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "../doctest.h"
+
+#include "dpda.hpp"
+#include "letter.hpp"
+#include "parser.hpp"
+#include "state.hpp"
 
 using namespace fl;
 

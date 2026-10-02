@@ -1,34 +1,6 @@
 #include <cassert>
 #include <iostream>
 
-// int main() {
-//	fl::InterningMonoid<char> sigma_star;
-//	using Value = decltype(sigma_star)::Value;
-//
-//	Value v1 = sigma_star.from("asdf");
-//
-//	Value v2 = sigma_star.from("as");
-//	Value v3 = sigma_star.from("df");
-//	Value v4 = sigma_star.mul(v2, v3);
-//
-//	assert(sigma_star.equal(v1, v4));
-//	assert(!sigma_star.equal(v1, v3));
-//
-//	assert(sigma_star.temporaryCount() == 0);
-//
-//	{
-//		auto temp = sigma_star.mul(v2, v3);
-//		assert(sigma_star.temporaryCount() == 1);
-//	}
-//
-//	assert(sigma_star.temporaryCount() == 0);
-//
-//	std::cout << "test passed" << std::endl;
-//
-// }
-
-import formlang;
-
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "../doctest.h"
 
@@ -38,6 +10,8 @@ import formlang;
 #include <string>
 #include <utility>
 #include <vector>
+
+#include "interning_monoid.hpp"
 
 namespace {
 

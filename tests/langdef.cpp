@@ -1,9 +1,15 @@
-import formlang;
-
 #include <ios>
 #include <iostream>
 #include <climits>
 #include <ranges>
+
+#include "fst_from_regex.hpp"
+#include "letter.hpp"
+#include "grammar_factory.hpp"
+#include "lex_traverser.hpp"
+#include "output_fsa.hpp"
+#include "parser.hpp"
+#include "token.hpp"
 
 int main() {
 	using namespace ll1g;

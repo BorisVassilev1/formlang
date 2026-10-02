@@ -1,5 +1,3 @@
-import formlang;
-
 #include <cassert>
 #include <cctype>
 #include <cstring>
@@ -11,7 +9,15 @@ import formlang;
 #include <climits>
 #include <iostream>
 #include <chrono>
+
+#include "cfg.hpp"
+#include "earley.hpp"
+#include "lex_traverser.hpp"
+#include "output_fsa.hpp"
 #include "utils_macros.hpp"
+#include "token.hpp"
+#include "grammar_factory.hpp"
+#include "wordset.hpp"
 
 using namespace fl;
 

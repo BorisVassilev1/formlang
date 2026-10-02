@@ -5,10 +5,10 @@
 // self-checks against the concrete fl::Letter/fl::Token type live here
 // instead, in one place, importing the finished module.
 
-import formlang;
-
 #include <ranges>
 #include <iterator>
+
+#include "formlang.hpp"
 
 using SSFSTType = fl::SparseSSFST<fl::Letter, fl::InterningMonoid<fl::Letter>>;
 

@@ -1,8 +1,9 @@
-import formlang;
-
 #include <iostream>
 #include <vector>
 #include <ranges>
+
+#include "concepts.hpp"
+#include "replace_marker_ssft.hpp"
 
 class MySymbol {
    public:
