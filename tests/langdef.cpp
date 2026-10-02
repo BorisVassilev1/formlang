@@ -80,7 +80,7 @@ int main() {
 	// std::cout << std::endl;
 
 	std::cin >> std::noskipws;
-	auto input = std::views::istream<char>(std::cin) | std::views::cache_latest;
+	auto input = std::views::istream<char>(std::cin);
 
 	LexerRange lexer(input, std::move(SSFTTokenizer), Token::createToken("ERROR"));
 	for (auto [token, from, to, line, str] : lexer) {

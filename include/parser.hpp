@@ -222,7 +222,7 @@ class Parser : public DPDA<State<Symbol>, Symbol> {
 				if (product.empty()) topNode->children.push_back(std::make_unique<ParseNode<Symbol>>(Symbol::eps));
 
 				if (parseStack.size() == 1) break;
-				auto [childNode, _, _] = std::move(parseStack.top());
+				auto [childNode, __, ___] = std::move(parseStack.top());
 				parseStack.pop();
 
 				auto &[topNode, idx, prod_index] = parseStack.top();
@@ -262,12 +262,12 @@ class Parser : public DPDA<State<Symbol>, Symbol> {
 		while (word_position < word.size()) {
 			auto &[topNode, idx, prod_index] = parseStack.top();
 			const auto &[from, to]			 = productions[prod_index].get();
-			const auto &[_, _, A]			 = from;
-			const auto &[_, product]		 = to;
+			const auto &[_, __, A]			 = from;
+			const auto &[___, product]		 = to;
 
 			if (idx == product.size()) {
 				if (parseStack.size() == 1) break;
-				auto [childNode, _, _] = std::move(parseStack.top());
+				auto [childNode, _, __] = std::move(parseStack.top());
 				parseStack.pop();
 
 				const auto &NTData				 = g.getNonTerminalData(A);

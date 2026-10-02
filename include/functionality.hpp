@@ -22,39 +22,6 @@
 namespace fl {
 using sv = std::string_view;
 
-template <class U, class V>
-auto remainderSuffix(U &&w, V &&s) {
-	assert(std::distance(std::begin(w), std::end(w)) <= std::distance(std::begin(s), std::end(s)));
-	return std::ranges::subrange(std::begin(s) + std::distance(std::begin(w), std::end(w)), std::end(s));
-}
-
-template <class U, class V, class W, class X>
-auto w(U &&u, V &&v, W &&alpha, X &&beta) {
-	auto u_alpha = std::views::concat(u, alpha);
-	auto v_beta	 = std::views::concat(v, beta);
-	auto c		 = commonPrefix(u_alpha, v_beta);
-	return std::tuple((remainderSuffix(c, std::move(u_alpha))), (remainderSuffix(c, std::move(v_beta))));
-}
-
-template <class Letter, class U, class V, class W, class X>
-auto w_noref(U &&u, V &&v, W &&alpha, X &&beta) {
-	auto u_alpha = std::views::concat(u, alpha);
-	auto v_beta	 = std::views::concat(v, beta);
-	auto c		 = commonPrefix(u_alpha, v_beta);
-	return std::tuple(toSymbol<Letter>(remainderSuffix(c, std::move(u_alpha))),
-					  toSymbol<Letter>(remainderSuffix(c, std::move(v_beta))));
-}
-
-template <class U, class V>
-bool balancible(U &&u, V &&v) {
-	return u.size() == 0 || v.size() == 0;
-}
-
-template <class T>
-bool balancible(T &&t) {
-	return balancible(std::get<0>(t), std::get<1>(t));
-}
-
 template <free_monoid M>
 bool balancible(const M &m, auto u, auto v) {
 	return m.size(u) == 0 || m.size(v) == 0;
@@ -64,8 +31,6 @@ template <class U, class V>
 bool eq(U &&u, V &&v) {
 	return std::equal(std::begin(u), std::end(u), std::begin(v), std::end(v));
 }
-
-auto tovector = [](const auto &x) { return std::vector(x.begin(), x.end()); };
 
 }	  // namespace fl
 
@@ -85,6 +50,7 @@ bool isFunctional(const ExpandedFST<S, M> &fst) {
 
 	unordered_map<std::tuple<State, State>, std::tuple<std::vector<Symbol>, std::vector<Symbol>>> Adm;
 	std::queue<std::tuple<State, State>>														  queue;
+	auto tovector = [](const auto &x) { return std::vector(x.begin(), x.end()); };
 
 	std::vector<bool> coFinals(fst.N * fst.N, false);
 	{
@@ -100,7 +66,7 @@ bool isFunctional(const ExpandedFST<S, M> &fst) {
 				   std::views::filter([](const auto &pair) {
 					   const auto &[t1, t2] = pair;
 					   const auto &[a, _]	= t1;
-					   const auto &[b, _]	= t2;
+					   const auto &[b, __]	= t2;
 					   return a == b;	  // only consider transitions with the same Letter
 				   });
 		};
@@ -120,7 +86,7 @@ bool isFunctional(const ExpandedFST<S, M> &fst) {
 			auto Dq = DeltaRev(q, h);
 			for (const auto &[t1, t2] : Dq) {
 				auto &[_, i] = t1;
-				auto &[_, j] = t2;
+				auto &[__, j] = t2;
 				if (coFinals[i * fst.N + j]) continue;
 				coFinals[i * fst.N + j] = true;		// mark as co-final
 				queueRev.push({i, j});
@@ -144,7 +110,7 @@ bool isFunctional(const ExpandedFST<S, M> &fst) {
 				   const auto &[value1, to1] = t1;
 				   const auto &[value2, to2] = t2;
 				   const auto &[a, _]		 = value1;
-				   const auto &[b, _]		 = value2;
+				   const auto &[b, __]		 = value2;
 				   return a == b && isCoFinal(to1, to2);	 // only consider transitions with the same letter
 			   });
 	};
@@ -284,7 +250,7 @@ bool testBoundedVariation(const ExpandedFST<Letter, M> &fst) {
 				   const auto &[value1, to1] = t1;
 				   const auto &[value2, to2] = t2;
 				   const auto &[a, _]		 = value1;
-				   const auto &[b, _]		 = value2;
+				   const auto &[b, __]		 = value2;
 				   return a == b;
 			   });
 	};
@@ -304,6 +270,7 @@ bool testBoundedVariation(const ExpandedFST<Letter, M> &fst) {
 	std::cout << "C = " << C << ", MAX_DELAY = " << MAX_DELAY << std::endl;
 
 	bool boundedVariation = true;
+	auto tovector		  = [](const auto &x) { return std::vector(x.begin(), x.end()); };
 
 	using namespace std::chrono_literals;
 	SlowDown3 sd(100ms);
