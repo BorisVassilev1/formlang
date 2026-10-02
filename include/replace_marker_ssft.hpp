@@ -318,8 +318,10 @@ class ReplaceWithMarkerSSFT : public TotalSSFST<Symbol, alphabetSize, InterningM
 			return std::lexicographical_compare(a.match.begin(), a.match.end(), b.match.begin(), b.match.end());
 		});
 
-		insertTemporary(sortedRules[0], tempData);
-		tempData.prevRuleMeta = &sortedRules[0];
+		if (!sortedRules.empty()) {
+			insertTemporary(sortedRules[0], tempData);
+			tempData.prevRuleMeta = &sortedRules[0];
+		}
 		for (size_t i = 1; i < sortedRules.size(); ++i) {
 			auto &ruleMeta = sortedRules[i];
 

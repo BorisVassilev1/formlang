@@ -9,7 +9,6 @@
 
 #include "token_macros.hpp"
 
-
 #include "concepts.hpp"
 #include "hashing.hpp"
 #include "formatting.hpp"
@@ -106,7 +105,10 @@ struct Token {
 	bool operator>=(const Token &other) const { return value >= other.value; }
 
 	void debug_print(std::ostream &out) const {
-		if (value < Token::INITIAL_SIZE) print_escaped_char(out, static_cast<unsigned char>(value));
+		if (value < Token::INITIAL_SIZE) {
+			print_escaped_char(out, static_cast<unsigned char>(value));
+			return;
+		}
 		auto it = detail::getTokenNames().find(value);
 		if (it == detail::getTokenNames().end()) { out << value; }
 		out << it->second;

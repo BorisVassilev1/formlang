@@ -169,14 +169,13 @@ class Parser : public DPDA<State<Symbol>, Symbol> {
 
 		try {
 			for (const auto &[A, v] : grammar.rules) {
-				if (v.empty()) {
+				const auto &firstA = grammar.first(v.rhs, nullable, first);
+				for (const auto l : firstA) {
+					addTransition(f(l), Symbol::eps, A, f(l), v);
+				}
+				if (grammar.nullable(v.rhs, nullable)) {
 					const auto &followA = follow.find(A)->second;
 					for (const auto l : followA) {
-						addTransition(f(l), Symbol::eps, A, f(l), v);
-					}
-				} else {
-					const auto &firstA = grammar.first(v.rhs, nullable, first);
-					for (const auto l : firstA) {
 						addTransition(f(l), Symbol::eps, A, f(l), v);
 					}
 				}

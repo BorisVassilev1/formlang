@@ -5,11 +5,6 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Every target that (transitively) imports the `formlang` module must compile with the exact
-# same flags, or CMake has to build a separate copy of every module partition's BMI per distinct
-# flag set (visible as "@synth_N" build steps) -- silently multiplying the whole module graph's
-# compile cost. Keep this one list shared by `lang` and its own test executables; the top-level
-# bpe_proofs project mirrors it for the same reason.
 set(COMPILE_ARGS
 	-Wall -Wextra -Wpedantic --pedantic-errors -O3
 	$<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-c2y-extensions>

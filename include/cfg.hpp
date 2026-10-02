@@ -26,7 +26,8 @@ struct Production {
 	Symbol				replaceWith;	 // if != eps, replace the non-terminal that produced this production
 										 // with this symbol in the AST
 
-	Production(std::vector<Symbol> &&rhs) : rhs(std::move(rhs)), ignore(rhs.size(), false), replaceWith(Symbol::eps) {}
+	Production(std::vector<Symbol> &&rhs)
+		: rhs(std::move(rhs)), ignore(this->rhs.size(), false), replaceWith(Symbol::eps) {}
 	Production(const std::vector<Symbol> &rhs) : rhs(rhs), ignore(rhs.size(), false), replaceWith(Symbol::eps) {}
 
 	Production(std::vector<Symbol> &&rhs, const std::vector<bool> &ignore, Symbol replaceWith = Symbol::eps)
@@ -96,36 +97,38 @@ class CFG {
 	fl::unordered_map<Symbol, bool> findNullables() const {
 		fl::unordered_map<Symbol, bool> res;
 
-		for (const auto &[k, v] : rules) {
-			if (v.empty()) { res.insert({k, true}); }
-		}
 		for (Symbol l : terminals) {
 			res.insert({l, false});
 		}
+		for (Symbol l : nonTerminals) {
+			res.insert({l, false});
+		}
+		for (const auto &[k, v] : rules) {
+			if (v.empty()) { res.find(k)->second = true; }
+		}
 
-		std::size_t prevSize = 0;
-		while (prevSize != res.size()) {
-			prevSize = res.size();
+		bool change = true;
+		while (change) {
+			change = false;
 
 			for (const auto &[k, v] : rules) {
-				if (res.contains(k)) continue;
+				if (res.find(k)->second) continue;
 
 				bool isNullable = true;
-				bool isKnown	= true;
 				for (Symbol l : v) {
-					bool contains = res.contains(l);
-					if (contains && !res.find(l)->second) {
-						res.insert({k, false});
+					if (!res.find(l)->second) {
 						isNullable = false;
 						break;
 					}
-					isKnown = isKnown && contains;
 				}
-				if (isNullable && isKnown) { res.insert({k, true}); }
+				if (isNullable) {
+					res.find(k)->second = true;
+					change				= true;
+				}
 			}
 		}
 
-		return std::move(res);
+		return res;
 	}
 
 	/**

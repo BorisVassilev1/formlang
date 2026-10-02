@@ -109,16 +109,16 @@ class LexerRange : public std::ranges::view_interface<LexerRange<T, Range>> {
 		: range(&range), ssft(ssft), error_token(error_token) {}
 
 	class iterator {
-		InnerIterator			  current;
-		InnerSentinel			  end;
-		State					  current_state;
-		This					 *lex_ptr;
-		std::size_t				  position;
-		std::size_t				  output_position;
-		std::size_t				  line_number = 1;
-		mutable bool			  consumed	  = false;
-		std::vector<OutputSymbol> buffer;
-		mutable OutputSymbol	  queued_token = OutputSymbol::eps;
+		InnerIterator			 current;
+		InnerSentinel			 end;
+		State					 current_state;
+		This					*lex_ptr;
+		std::size_t				 position;
+		std::size_t				 output_position;
+		std::size_t				 line_number = 1;
+		mutable bool			 consumed	 = false;
+		std::vector<InputSymbol> buffer;
+		mutable OutputSymbol	 queued_token = OutputSymbol::eps;
 
 	   public:
 		iterator(InnerIterator &&begin, InnerSentinel &&end, This *lex_ptr)
@@ -191,17 +191,17 @@ class LexerRange : public std::ranges::view_interface<LexerRange<T, Range>> {
 			if (queued_token != OutputSymbol::eps) {
 				auto t		 = queued_token;
 				queued_token = OutputSymbol::eps;
-				return TokenData{t, output_position, position - 1, line_number,
+				return TokenData{t, output_position, std::max(output_position, position - 1), line_number,
 								 std::span(buffer.begin(), buffer.end())};
 			}
 			if (lex_ptr->ssft.IsFinal(current_state)) {
 				const auto &output_value = lex_ptr->ssft.Psi(current_state);
 				const auto &output_range = get<1>(lex_ptr->ssft.GetMonoid()).gen(output_value);
-				return TokenData{*output_range.begin(), output_position, position - 1, line_number,
-								 std::span(buffer.begin(), buffer.end())};
+				return TokenData{*output_range.begin(), output_position, std::max(output_position, position - 1),
+								 line_number, std::span(buffer.begin(), buffer.end())};
 			} else {
-				return TokenData{lex_ptr->error_token, output_position, position - 1, line_number,
-								 std::span(buffer.begin(), buffer.end())};
+				return TokenData{lex_ptr->error_token, output_position, std::max(output_position, position - 1),
+								 line_number, std::span(buffer.begin(), buffer.end())};
 			}
 		}
 	};

@@ -286,3 +286,17 @@ TEST_CASE("ambiguous grammar") {
 	CHECK_THROWS_PRINT(a = new Parser(g));
 	(void)a;
 }
+
+TEST_CASE("epsilon grammar") {
+	CFG<Letter> g;
+	g.terminals	   = {'a', 'b', '#'};
+	g.nonTerminals = {'S', 'A', 'B'};
+	g.start		   = 'S';
+	g.addRule('S', "AB");
+	g.addRule('A', {});
+	g.addRule('B', {});
+
+	Parser<Letter> a(g);
+	CHECK_RECOGNIZE(a, "#");
+	CHECK_RECOGNIZE_FALSE(a, "a");
+}

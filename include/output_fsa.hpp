@@ -180,7 +180,7 @@ class UnionOutputFSA : public OutputFSA<Symbol> {
 			this->qFirsts = {0};
 			return;
 		}
-		this->N		  = 1;	   // new initial state
+		this->N		  = 0;	   // new initial state
 		this->qFirsts = {};
 
 		unsigned int offset = 0;
@@ -190,6 +190,7 @@ class UnionOutputFSA : public OutputFSA<Symbol> {
    private:
 	template <class FSAType>
 	void addFSA(FSAType &&fsa, unsigned int offset) {
+		this->N += fsa.N;
 		for (const auto &q : fsa.qFirsts) {
 			this->qFirsts.insert(q + offset);
 		}

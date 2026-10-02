@@ -252,7 +252,7 @@ class SparseSSFST {
 												print_if_can(get<1>(monoid), this->output[newIndex])));
 							else {
 								// try to resolve by choosing the output that ends in this state
-								assert(bestOutToKeep != -1ull);
+								assert(bestOutToKeep != -1u);
 								auto [b1, e1] = fsa.transitions.equal_range(bestOutToKeep);
 								auto [b2, e2] = fsa.transitions.equal_range(q);
 
