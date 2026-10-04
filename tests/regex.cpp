@@ -113,7 +113,7 @@ int main(int argc, char **argv) {
 		}
 		try {
 			std::cout << "converting to SSFT..." << std::endl;
-			auto ssfst = SparseSSFST<Letter>(std::move(efst));
+			auto ssfst = subsequentializeFST<SparseSSFST<Letter>>(efst);
 			drawFSA(ssfst);
 
 			statFSA(ssfst);

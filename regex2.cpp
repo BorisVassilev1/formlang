@@ -92,7 +92,7 @@ int main() {
 
 	try {
 		std::cout << "converting to SSFT..." << std::endl;
-		auto ssfst = SparseSSFST<fl::Letter>(std::move(realtime));
+		auto ssfst = subsequentializeFST<SparseSSFST<fl::Letter>>(realtime);
 		drawFSA(ssfst);
 
 		std::cout << "SSFT has " << ssfst.Size() << " states and " << ssfst.Transitions().size() << " transitions."
