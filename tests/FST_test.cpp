@@ -42,7 +42,7 @@ void test_determinization() {
 		std::cout << "FSA is functional." << std::endl;
 	}
 
-	SSFST_t<Letter> ssft = subsequentializeFST<SSFST_t<Letter>>(fsa);
+	SSFST_t<Letter> ssft = subsequentializeFST<SSFST_t<Letter>>(crochemorePseudoMinimizeFST(pseudoDeterminizeFST(fsa)));
 	statFSA(ssft);
 
 	std::cout << "draw SSFT" << std::endl;
@@ -71,7 +71,7 @@ void test_bounded_variation() {
 	}
 
 	try {
-		SSFST_t<Letter> ssft = subsequentializeFST<SSFST_t<Letter>>(efst);
+		SSFST_t<Letter> ssft = subsequentializeFST<SSFST_t<Letter>>(crochemorePseudoMinimizeFST(pseudoDeterminizeFST(efst)));
 		statFSA(ssft);
 
 		std::cout << "draw SSFT" << std::endl;
@@ -127,7 +127,7 @@ void test_replace() {
 		std::cout << "FSA is functional." << std::endl;
 	}
 
-	SSFST_t<Letter> ssft = subsequentializeFST<SSFST_t<Letter>>(fsa);
+	SSFST_t<Letter> ssft = subsequentializeFST<SSFST_t<Letter>>(crochemorePseudoMinimizeFST(pseudoDeterminizeFST(fsa)));
 	statFSA(ssft);
 
 	std::cout << "draw SSFT" << std::endl;

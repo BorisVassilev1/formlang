@@ -68,6 +68,7 @@ int main() {
 	}
 
 	auto realtime = realtimeFST(std::move(fst));
+	realtime = crochemorePseudoMinimizeFST(pseudoDeterminizeFST(realtime));
 	std::cout << "realtime FST has " << realtime.N << " states and " << realtime.transitions.size() << " transitions."
 			  << std::endl;
 	// drawFSA(realtime);
@@ -89,7 +90,8 @@ int main() {
 
 	try {
 		std::cout << "converting to SSFT..." << std::endl;
-		auto ssfst = subsequentializeFST<SparseSSFST<fl::Letter>>(realtime);
+		auto ssfst =
+			subsequentializeFST<SparseSSFST<Letter>>(crochemorePseudoMinimizeFST(pseudoDeterminizeFST(realtime)));
 
 		std::cout << "SSFT has " << ssfst.Size() << " states and " << ssfst.Transitions().size() << " transitions."
 				  << std::endl;

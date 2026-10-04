@@ -113,7 +113,7 @@ int main(int argc, char **argv) {
 		}
 		try {
 			std::cout << "converting to SSFT..." << std::endl;
-			auto ssfst = subsequentializeFST<SparseSSFST<Letter>>(efst);
+			auto ssfst = subsequentializeFST<SparseSSFST<Letter>>(crochemorePseudoMinimizeFST(pseudoDeterminizeFST(efst)));
 			drawFSA(ssfst);
 
 			statFSA(ssfst);
