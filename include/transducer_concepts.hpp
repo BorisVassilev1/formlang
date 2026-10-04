@@ -31,12 +31,8 @@ concept FSA = monoid<typename T::Monoid> && state<typename T::State> && requires
 
 template <class T>
 concept FSA_builder = FSA<T> && requires(T t, typename T::State s, typename T::Monoid::Value v) {
-	{ t.NewState() } -> std::same_as<typename T::State>;
-	{ t.AddTransition(s, v, s) };
-	//{ get<0>(t.AddTransition(s, v, s)) } -> std::same_as<bool>;
-	//{
-	//	*get<1>(t.AddTransition(s, v, s))
-	//} -> std::same_as<std::tuple<typename T::State, typename T::Monoid::Value, typename T::State>>;
+	{ t.NewState() } -> std::same_as<typename T::State>;	 /// guarantees the smallest unused ID is returned
+	{ t.AddTransition(s, v, s) };							 // returns whatever
 	{ t.AddInitial(s) } -> std::same_as<void>;
 	{ t.AddFinal(s) } -> std::same_as<void>;
 };
@@ -119,6 +115,13 @@ concept SSFST =		//
 template <class T>
 concept SSFST_traversable = SSFST<T> && FST_traversable<T>;
 
+template <class T>
+concept SSFST_builder =
+	SSFST<T> && FSA_builder<T> &&
+	requires(T t, typename T::State s, typename get_input_t<T>::Symbol l, typename get_output_t<T>::Value v) {
+		{ t.SetPsi(s, v) } -> std::same_as<void>;
+	};
+
 /// An SSFST that also emits output before consuming the first symbol (the
 /// start state carries its own Psi-value).
 template <class T>
@@ -128,5 +131,11 @@ concept SSFSTI = SSFST<T> && requires(const T t) {
 
 template <class T>
 concept SSFSTI_traversable = SSFSTI<T> && FST_traversable<T>;
+
+template <class T>
+concept SSFSTI_builder =
+	SSFSTI<T> && SSFST_builder<T> && requires(T t, typename T::State s, typename get_input_t<T>::Symbol l) {
+		{ t.SetInitialOutput(typename T::OutputMonoid::Value{}) } -> std::same_as<void>;
+	};
 
 }	  // namespace fl

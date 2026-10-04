@@ -98,6 +98,28 @@ class TotalSSFST {
 	}
 	const Monoid &GetMonoid() const { return monoid; }
 
+	//////////////// builder interface //////////////////////
+
+	State NewState() {
+		State newState = N++;
+		transitions.emplace_back();
+		output.push_back(OutputMonoid::identity);
+		return newState;
+	}
+
+	void AddTransition(State from, Monoid::Value label, State to) {
+		const auto &[letter, outputID]	  = label;
+		transitions[from][size_t(letter)] = {outputID, to};
+	}
+
+	void AddInitial(State state) { assert(state == 0); }	 /// only state 0 is initial
+	void AddFinal(State state) { assert(state < N); }		 /// all states are final
+	void SetInitialOutput(OutValue v) { initialOut = std::move(v); }
+	void SetPsi(State state, OutValue v) {
+		assert(state < N);
+		output[state] = std::move(v);
+	}
+
 	/// this can return some kind of weird range, but let's be reasonable
 	void f(range_of<Symbol> auto input, std::vector<OutValue> &outputWord) const {
 		State state = 0;
