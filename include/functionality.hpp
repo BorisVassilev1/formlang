@@ -85,7 +85,7 @@ bool isFunctional(const ExpandedFST<S, M> &fst) {
 
 			auto Dq = DeltaRev(q, h);
 			for (const auto &[t1, t2] : Dq) {
-				auto &[_, i] = t1;
+				auto &[_, i]  = t1;
 				auto &[__, j] = t2;
 				if (coFinals[i * fst.N + j]) continue;
 				coFinals[i * fst.N + j] = true;		// mark as co-final
@@ -97,7 +97,7 @@ bool isFunctional(const ExpandedFST<S, M> &fst) {
 	for (const auto q : coFinals) {
 		if (q) cnt++;
 	}
-	std::cout << "coFinals: " << cnt << " / " << fst.N * fst.N << std::endl;
+	if constexpr (dbg::enabled) std::cout << "coFinals: " << cnt << " / " << fst.N * fst.N << std::endl;
 
 	auto isCoFinal = [&coFinals, &fst](State i, State j) { return coFinals[i * fst.N + j]; };
 	auto isFinal   = [&fst](State i, State j) { return fst.qFinals.contains(i) && fst.qFinals.contains(j); };
@@ -155,25 +155,24 @@ bool isFunctional(const ExpandedFST<S, M> &fst) {
 					Adm.insert({{i, j}, {tovector(m.gen(h_1)), tovector(m.gen(h_2))}});
 				}
 			} else {
-				std::cout << "-> \"" << print_if_can(m, h_1) << "\", \"" << print_if_can(m, h_2) << "\"" << std::endl;
-				std::cout << "len: " << m.size(h_1) << " " << m.size(h_2) << std::endl;
-				std::cout << "balancible: " << balancible(m, h_1, h_2) << std::endl;
-				std::cout << "isFinal: " << isFinal(i, j) << std::endl;
-				std::cout << "Q = (" << q << ", " << h << ")" << std::endl;
-				std::cout << "q2 = (" << std::get<0>(q2) << ", " << std::get<1>(q2) << ")" << std::endl;
-				std::cout << "Adm(" << q << ", " << h << ") = (" << toString(u) << "," << toString(v) << ")"
-						  << ", len1: " << u.size() << ", len2: " << v.size() << std::endl;
-				if (q2_it != Adm.end()) {
-					std::cout << "Adm(" << i << ", " << j << ") = (" << toString(std::get<0>(q2_it->second)) << ","
-							  << toString(std::get<1>(q2_it->second)) << ")" << std::endl;
-				} else {
-					std::cout << "Adm(" << i << ", " << j << ") not found" << std::endl;
-				}
-				std::cout << "cofinal(" << i << ", " << j << ") = " << isCoFinal(i, j) << std::endl;
-				std::cout << "l1: " << l1 << ", l2: " << l2 << std::endl;
-				std::cout << "w1: \"" << print_if_can(m, w1) << "\", w2: \"" << print_if_can(m, w2) << "\""
-						  << std::endl;
-				std::cout << "length1: " << m.size(w1) << ", length2: " << m.size(w2) << std::endl;
+				// std::cout << "-> \"" << print_if_can(m, h_1) << "\", \"" << print_if_can(m, h_2) << "\"" <<
+				// std::endl; std::cout << "len: " << m.size(h_1) << " " << m.size(h_2) << std::endl; std::cout <<
+				// "balancible: " << balancible(m, h_1, h_2) << std::endl; std::cout << "isFinal: " << isFinal(i, j) <<
+				// std::endl; std::cout << "Q = (" << q << ", " << h << ")" << std::endl; std::cout << "q2 = (" <<
+				// std::get<0>(q2) << ", " << std::get<1>(q2) << ")" << std::endl; std::cout << "Adm(" << q << ", " << h
+				// << ") = (" << toString(u) << "," << toString(v) << ")"
+				//		  << ", len1: " << u.size() << ", len2: " << v.size() << std::endl;
+				// if (q2_it != Adm.end()) {
+				//	std::cout << "Adm(" << i << ", " << j << ") = (" << toString(std::get<0>(q2_it->second)) << ","
+				//			  << toString(std::get<1>(q2_it->second)) << ")" << std::endl;
+				// } else {
+				//	std::cout << "Adm(" << i << ", " << j << ") not found" << std::endl;
+				// }
+				// std::cout << "cofinal(" << i << ", " << j << ") = " << isCoFinal(i, j) << std::endl;
+				// std::cout << "l1: " << l1 << ", l2: " << l2 << std::endl;
+				// std::cout << "w1: \"" << print_if_can(m, w1) << "\", w2: \"" << print_if_can(m, w2) << "\""
+				//		  << std::endl;
+				// std::cout << "length1: " << m.size(w1) << ", length2: " << m.size(w2) << std::endl;
 
 				return false;	  // not functional
 			}
@@ -267,7 +266,7 @@ bool testBoundedVariation(const ExpandedFST<Letter, M> &fst) {
 	auto		 MAX_DELAY = C * fst.N * fst.N;		// C * |Q|^2
 	auto		 curr_max  = 0u;
 
-	std::cout << "C = " << C << ", MAX_DELAY = " << MAX_DELAY << std::endl;
+	if constexpr (dbg::enabled) std::cout << "C = " << C << ", MAX_DELAY = " << MAX_DELAY << std::endl;
 
 	bool boundedVariation = true;
 	auto tovector		  = [](const auto &x) { return std::vector(x.begin(), x.end()); };
@@ -309,11 +308,12 @@ bool testBoundedVariation(const ExpandedFST<Letter, M> &fst) {
 			longest = std::max<unsigned int>(longest, h_1_size);
 			longest = std::max<unsigned int>(longest, h_2_size);
 
-			sd.do_thing([&]() {
-				std::cout << "\rCurrent max delay: " << curr_max;
-				std::cout << " Adm size: " << Adm.size() << " Delay upper bound: " << MAX_DELAY;
-				std::cout << " queue size: " << queue.size() << std::flush;
-			});
+			if constexpr (dbg::enabled)
+				sd.do_thing([&]() {
+					std::cout << "\rCurrent max delay: " << curr_max;
+					std::cout << " Adm size: " << Adm.size() << " Delay upper bound: " << MAX_DELAY;
+					std::cout << " queue size: " << queue.size() << std::flush;
+				});
 
 			if (boundedVariation) {
 				auto [inserted_it, b] = Adm.insert({{i, j}, {tovector(m.gen(h_1)), tovector(m.gen(h_2))}});
@@ -324,10 +324,12 @@ bool testBoundedVariation(const ExpandedFST<Letter, M> &fst) {
 		}
 	}
 
-	std::cout << "\rCurrent max delay: " << curr_max;
-	std::cout << " Adm size: " << Adm.size() << " Delay upper bound: " << MAX_DELAY;
-	std::cout << " queue size: " << queue.size() << std::flush;
-	std::cout << "\n\n" << std::flush;
+	if constexpr (dbg::enabled) {
+		std::cout << "\rCurrent max delay: " << curr_max;
+		std::cout << " Adm size: " << Adm.size() << " Delay upper bound: " << MAX_DELAY;
+		std::cout << " queue size: " << queue.size() << std::flush;
+		std::cout << "\n\n" << std::flush;
+	}
 
 	return true;
 }

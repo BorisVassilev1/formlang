@@ -9,19 +9,32 @@
 
 namespace fl {
 
-template <FSA_builder TOut, FST T1, FST T2>
-	requires(FST_with_arcs<T1> && FST_traversable<T2> &&
-			 std::same_as<typename T1::OutputMonoid::Symbol, typename T2::InputMonoid::Symbol>)
-TOut composeFST(const T1 &first, const T2 &second) {
+template <typename T1, typename T2>
+concept composable = FST_with_arcs<T1> && FST_traversable<T2> &&
+					 std::same_as<typename T1::OutputMonoid::Symbol, typename T2::InputMonoid::Symbol>;
+
+namespace detail {
+
+template <typename TOut, typename T1>
+using out_or_t = std::conditional_t<std::is_void_v<TOut>, T1, TOut>;
+
+}	  // namespace detail
+
+template <class TOut = void, FST T1, FST T2>
+	requires composable<T1, T2> && FSA_builder<detail::out_or_t<TOut, T1>>
+auto composeFST(const T1 &first, const T2 &second) {
 	using State1   = typename T1::State;
 	using State2   = typename T2::State;
 	using BigState = std::tuple<State1, State2>;
 
-	using Value		   = typename TOut::Monoid::Value;
-	using OutputMonoid = get_output_t<TOut>;
+	using Result = std::conditional_t<std::is_void_v<TOut>, T1, TOut>;
+
+	using Value		   = typename Result::Monoid::Value;
+	using OutputMonoid = get_output_t<Result>;
 	using OutValue	   = typename OutputMonoid::Value;
-	using State		   = typename TOut::State;
-	TOut out;
+	using State		   = typename Result::State;
+
+	Result out;
 
 	auto &outMonoid = get<1>(out.GetMonoid());
 
@@ -80,11 +93,11 @@ TOut composeFST(const T1 &first, const T2 &second) {
 
 	State2 s2afterInit = s2init;
 	if constexpr (SSFST<T2>)
-		static_assert(SSFST_builder<TOut>,
+		static_assert(SSFST_builder<Result>,
 					  "Output FST must have final state output if second input FST has final state output");
 
 	if constexpr (SSFSTI<T1> || SSFSTI<T2>)
-		static_assert(SSFSTI_builder<TOut>,
+		static_assert(SSFSTI_builder<Result>,
 					  "Output FST must have initial output if either input FST has initial output");
 
 	if constexpr (SSFSTI<T1>) {

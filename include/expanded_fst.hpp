@@ -16,6 +16,7 @@
 
 #include "concepts.hpp"
 #include "cartesian_monoid.hpp"
+#include "dbg.hpp"
 #include "symbol_monoid.hpp"
 #include "transducer_concepts.hpp"
 #include "hashing.hpp"
@@ -66,15 +67,16 @@ class ExpandedFST {
 	explicit constexpr ExpandedFST(Monoid &&m) : N(0), monoid(std::move(m)) {}
 	explicit constexpr ExpandedFST(const Monoid &m) : N(0), monoid(m) {}
 
-	State newState() { return N++; }
+	State NewState() { return N++; }
 
-	void addTransition(State from, InSymbol a, OutValue b, State to) { transitions.insert({from, {Value(a, b), to}}); }
-	void addTransition(State from, const Value &label, State to) { transitions.insert({from, {label, to}}); }
+	void AddTransition(State from, const Value &label, State to) { transitions.insert({from, {label, to}}); }
+	void AddInitial(State q) { qFirsts.insert(q); }
+	void AddFinal(State q) { qFinals.insert(q); }
 
 	template <class T>
 		requires free_monoid<M>
 	void addTransition(State from, InSymbol a, T &&b, State to) {
-		addTransition(from, a, get<1>(monoid).from(b), to);
+		AddTransition(from, Value{a, get<1>(monoid).from(b)}, to);
 	}
 
 	/// re-creates a value that was produced by a different (but structurally
@@ -113,6 +115,10 @@ class ExpandedFST {
 		out << "}\n";
 	}
 
+	void printInfo(std::ostream &out) const {
+		out << "Expanded FST: |Q| = " << N << ", |Δ| = " << transitions.size() << ", |F| = " << qFinals.size() << "\n";
+	}
+
 	const auto &GetMonoid() const { return monoid; }
 
 	const auto &Initial() const { return qFirsts; }
@@ -136,6 +142,11 @@ class ExpandedFST {
 	}
 };
 
+template <symbol Symbol, monoid M>
+void statFSA(const ExpandedFST<Symbol, M> &fsa, std::ostream &out = std::cout) {
+	fsa.printInfo(out);
+}
+
 /// mutable view of the output-tape value carried by every transition. The input tape
 /// (always a plain SymbolMonoid, never pooled) is never what compact() needs to touch --
 /// only the output tape's InterningMonoid is ever compactable here -- so this projects
@@ -144,9 +155,8 @@ class ExpandedFST {
 /// SharedCartesianMonoid::compact()'s generic per-tape dispatch.
 template <class Map>
 auto transitionValues(Map &transitions) {
-	return transitions | std::views::values | std::views::transform([](auto &labelAndTo) -> auto & {
-			   return std::get<1>(std::get<0>(labelAndTo));
-		   });
+	return transitions | std::views::values |
+		   std::views::transform([](auto &labelAndTo) -> auto & { return std::get<1>(std::get<0>(labelAndTo)); });
 }
 
 /// expands the transducer. in the case where output is longer than input,
@@ -155,24 +165,25 @@ template <FST T>
 auto expandFST(T &&fst) {
 	using I		 = get_input_t<T>;
 	using M		 = get_output_t<T>;
-	using Symbol = typename I::Symbol;
+	using Symbol = I::Symbol;
 
 	ExpandedFST<Symbol, M> expanded;
-	using State	   = typename ExpandedFST<Symbol, M>::State;
-	using OutValue = typename ExpandedFST<Symbol, M>::OutValue;
+	using State		  = typename ExpandedFST<Symbol, M>::State;
+	using OutValue	  = typename ExpandedFST<Symbol, M>::OutValue;
+	using ResultValue = typename ExpandedFST<Symbol, M>::Monoid::Value;
 
 	expanded.N		 = fst.Size();
 	expanded.qFirsts = std::move(fst.Initial());
 	expanded.qFinals = std::move(fst.Final());
 
-	//const auto &inMonoid  = get<0>(expanded.GetMonoid());
+	// const auto &inMonoid  = get<0>(expanded.GetMonoid());
 	const auto &outMonoid = get<1>(expanded.GetMonoid());
 
 	for (const auto &[from, label, to] : fst.Transitions()) {
 		auto [w1, w2] = fst.GetMonoid().gen(label);
 		if (fst.template isIdentityOnTape<0>(label)) {
 			OutValue new_val = outMonoid.own(get<1>(fst.monoid), std::get<1>(label));
-			expanded.addTransition(from, Symbol::eps, new_val, to);
+			expanded.AddTransition(from, ResultValue{Symbol::eps, new_val}, to);
 			continue;
 		}
 		State prev = from;
@@ -184,28 +195,28 @@ auto expandFST(T &&fst) {
 			for (uint32_t i = 0; i < w1.size() - 1; ++i) {
 				const auto &a	  = *i1++;
 				const auto &b	  = *i2++;
-				State		next  = (i1 == w1.end()) ? to : expanded.newState();
+				State		next  = (i1 == w1.end()) ? to : expanded.NewState();
 				OutValue	w2val = outMonoid.from(std::span{&b, 1});
-				expanded.addTransition(prev, a, w2val, next);
+				expanded.AddTransition(prev, ResultValue{a, w2val}, next);
 				prev = next;
 			}
 			OutValue w2val = outMonoid.from(std::ranges::subrange(i2, w2.end()));
-			expanded.addTransition(prev, *i1, w2val, to);
+			expanded.AddTransition(prev, ResultValue{*i1, w2val}, to);
 		} else {
 			auto i1 = w1.begin();
 			auto i2 = w2.begin();
 			while (i2 != w2.end()) {
 				const auto &a	  = *i1++;
 				const auto &b	  = *i2++;
-				State		next  = (i2 == w2.end() && i1 == w1.end()) ? to : expanded.newState();
+				State		next  = (i2 == w2.end() && i1 == w1.end()) ? to : expanded.NewState();
 				OutValue	w2val = outMonoid.from(std::span{&b, 1});
-				expanded.addTransition(prev, a, w2val, next);
+				expanded.AddTransition(prev, ResultValue{a, w2val}, next);
 				prev = next;
 			}
 			while (i1 != w1.end()) {
 				const auto &a	 = *i1++;
-				State		next = (i1 == w1.end()) ? to : expanded.newState();
-				expanded.addTransition(prev, a, outMonoid.identity, next);
+				State		next = (i1 == w1.end()) ? to : expanded.NewState();
+				expanded.AddTransition(prev, ResultValue{a, outMonoid.identity}, next);
 				prev = next;
 			}
 		}
@@ -444,7 +455,7 @@ auto pseudoDeterminizeFST(const T &fst) {
 
 		auto it = state_map.find(bs);
 		if (it == state_map.end()) {
-			OutState new_id = dfa.newState();
+			OutState new_id = dfa.NewState();
 			for (const auto &s : bs) {
 				if (fst.IsFinal(s)) {
 					dfa.qFinals.insert(new_id);
@@ -482,7 +493,7 @@ auto pseudoDeterminizeFST(const T &fst) {
 
 		for (const auto &[sigma, next_bs] : current_transitions) {
 			auto [next_state, is_new] = getStateID(BigState(next_bs));
-			dfa.addTransition(current, dfa.reintern(fst.GetMonoid(), sigma), next_state);
+			dfa.AddTransition(current, dfa.reintern(fst.GetMonoid(), sigma), next_state);
 			if (is_new) { queue.push(next_state); }
 		}
 	}
@@ -515,7 +526,7 @@ auto reverseFST(const T &fst) {
 		rev.qFirsts.insert(OutState(q));
 
 	for (const auto &[from, label, to] : fst.Transitions()) {
-		rev.addTransition(OutState(to), rev.reintern(fst.GetMonoid(), label), OutState(from));
+		rev.AddTransition(OutState(to), rev.reintern(fst.GetMonoid(), label), OutState(from));
 	}
 
 	if constexpr (requires { fst.f_eps; }) {	 /// TODO: this is a hack
@@ -535,27 +546,32 @@ auto reverseFST(const T &fst) {
 // Pseudo-minimization
 template <class T>
 	requires FST<T>
-auto pseudoMinimizeFST(const T &fst) {
+auto pseudoMinimizeFST_slow(const T &fst) {
 	return pseudoDeterminizeFST(reverseFST(pseudoDeterminizeFST(reverseFST(fst))));
 }
 
+namespace detail {
+
+template <typename TOut, typename T1>
+using out_or_t = std::conditional_t<std::is_void_v<TOut>, T1, TOut>;
+
+}	  // namespace detail
 /// Crochemore-style pseudo-minimization by partition refinement. The input must be pseudo-deterministic
 /// (at most one successor per state and (symbol, output) label), as pseudoDeterminizeFST produces.
 /// Equivalent states -- same finality and same labelled successor blocks -- are merged.
-template <FST_with_arcs T>
+template <class TOut = void, FST_with_arcs T>
+	requires FSA_builder<detail::out_or_t<TOut, T>>
 auto crochemorePseudoMinimizeFST(const T &fst) {
-	using Symbol = typename get_input_t<T>::Symbol;
-	using M		 = get_output_t<T>;
-	using FSA_t	 = ExpandedFST<Symbol, M>;
 	using Monoid = typename T::Monoid;
 	using Value	 = typename Monoid::Value;
 
+	using Result					= detail::out_or_t<TOut, T>;
 	constexpr std::size_t none		= std::numeric_limits<std::size_t>::max();
 	const auto			 &fstMonoid = fst.GetMonoid();
 
-	std::vector<std::size_t>		local(fst.Size(), none);
-	std::vector<typename T::State>	states;
-	std::queue<typename T::State>	bfs;
+	std::vector<std::size_t>	   local(fst.Size(), none);
+	std::vector<typename T::State> states;
+	std::queue<typename T::State>  bfs;
 	for (const auto &q : fst.Initial()) {
 		if (local[q] != none) continue;
 		local[q] = states.size();
@@ -576,23 +592,25 @@ auto crochemorePseudoMinimizeFST(const T &fst) {
 	std::unordered_map<Value, std::size_t, monoid_hash<Monoid>, monoid_equal<Monoid>> labelIds(
 		0, monoid_hash<Monoid>(&fstMonoid), monoid_equal<Monoid>(&fstMonoid));
 	std::vector<Value>											  labels;
-	std::vector<std::vector<std::pair<std::size_t, std::size_t>>> edges(states.size());	  // (label, local target)
+	std::vector<std::vector<std::pair<std::size_t, std::size_t>>> edges(states.size());		// (label, local target)
 	for (std::size_t i = 0; i < states.size(); ++i) {
 		for (const auto &[label, to] : fst.Transitions(states[i])) {
 			auto [it, fresh] = labelIds.try_emplace(label, labels.size());
 			if (fresh) labels.push_back(label);
 			edges[i].push_back({it->second, local[to]});
 		}
-		std::sort(edges[i].begin(), edges[i].end());
-		for (std::size_t k = 1; k < edges[i].size(); ++k) {
-			if (edges[i][k].first == edges[i][k - 1].first && edges[i][k].second != edges[i][k - 1].second)
-				throw std::invalid_argument("crochemorePseudoMinimizeFST: automaton is not pseudo-deterministic");
-		}
+		if constexpr (!T::sorted_arcs) std::sort(edges[i].begin(), edges[i].end());
+		if constexpr (dbg::enabled)
+			for (std::size_t k = 1; k < edges[i].size(); ++k) {
+				if (edges[i][k].first == edges[i][k - 1].first && edges[i][k].second != edges[i][k - 1].second)
+					throw std::invalid_argument("crochemorePseudoMinimizeFST: automaton is not pseudo-deterministic");
+			}
 		edges[i].erase(std::unique(edges[i].begin(), edges[i].end()), edges[i].end());
 	}
 
 	std::vector<std::size_t> block(states.size());
-	for (std::size_t i = 0; i < states.size(); ++i) block[i] = fst.IsFinal(states[i]) ? 1 : 0;
+	for (std::size_t i = 0; i < states.size(); ++i)
+		block[i] = fst.IsFinal(states[i]) ? 1 : 0;
 
 	std::size_t blockCount = 0;
 	while (true) {
@@ -602,7 +620,8 @@ auto crochemorePseudoMinimizeFST(const T &fst) {
 		for (std::size_t i = 0; i < states.size(); ++i) {
 			std::vector<std::pair<std::size_t, std::size_t>> successors;
 			successors.reserve(edges[i].size());
-			for (const auto &[label, to] : edges[i]) successors.push_back({label, block[to]});
+			for (const auto &[label, to] : edges[i])
+				successors.push_back({label, block[to]});
 			auto [it, _] = signatureIds.try_emplace({block[i], std::move(successors)}, signatureIds.size());
 			next[i]		 = it->second;
 		}
@@ -612,31 +631,42 @@ auto crochemorePseudoMinimizeFST(const T &fst) {
 		blockCount = newCount;
 	}
 
-	FSA_t								 result;
-	std::vector<std::size_t>			 representative(blockCount, none);
+	Result					 result;
+	std::vector<std::size_t> representative(blockCount, none);
 	for (std::size_t i = 0; i < states.size(); ++i) {
 		if (representative[block[i]] == none) representative[block[i]] = i;
 	}
-	for (std::size_t b = 0; b < blockCount; ++b) result.newState();
+	for (std::size_t b = 0; b < blockCount; ++b)
+		result.NewState();
 
 	for (std::size_t b = 0; b < blockCount; ++b) {
 		std::size_t i = representative[b];
-		if (fst.IsFinal(states[i])) result.qFinals.insert(b);
+		if (fst.IsFinal(states[i])) result.AddFinal(b);
 		for (const auto &[label, to] : edges[i]) {
-			result.addTransition(b, result.reintern(fstMonoid, labels[label]), block[to]);
+			result.AddTransition(b, result.GetMonoid().own(fstMonoid, labels[label]), block[to]);
 		}
 	}
-	for (const auto &q : fst.Initial()) result.qFirsts.insert(block[local[q]]);
+	for (const auto &q : fst.Initial())
+		result.AddInitial(block[local[q]]);
 
-	if constexpr (requires { fst.f_eps; }) {
-		for (const auto &v : fst.f_eps) result.addFEps(get<1>(result.monoid).own(get<1>(fstMonoid), v));
+	if constexpr (requires { fst.f_eps; }) {	 // TODO: this is a hack
+		for (const auto &v : fst.f_eps)
+			result.addFEps(get<1>(result.monoid).own(get<1>(fstMonoid), v));
 	}
 
-	if constexpr (compactable_monoid<typename FSA_t::Monoid>) {
-		get<1>(result.monoid).compact(transitionValues(result.transitions), result.f_eps);
+	if constexpr (compactable_monoid<typename Result::Monoid>) {
+		if constexpr (requires { fst.f_eps; })
+			get<1>(result.monoid).compact(transitionValues(result.transitions), result.f_eps);
+		else get<1>(result.monoid).compact(transitionValues(result.transitions));
 	}
 
 	return result;
+}
+
+template <FST_with_arcs T>
+	requires FSA_builder<T>
+auto pseudoMinimizeFST(const T &fst) {
+	return crochemorePseudoMinimizeFST<T>(fst);
 }
 
 }	  // namespace fl

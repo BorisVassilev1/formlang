@@ -14,7 +14,6 @@
 
 #include "debug_macros.hpp"
 
-
 #include "expanded_fst.hpp"
 #include "interning_monoid.hpp"
 #include "concepts.hpp"
@@ -66,7 +65,7 @@ class SparseSSFST {
 		transitions[{from, letter}]	   = {outputID, to};
 	}
 
-	void AddInitial(State state) { assert(state == 0); }	/// only state 0 is initial
+	void AddInitial([[maybe_unused]] State state) { assert(state == 0); }	  /// only state 0 is initial
 	void AddFinal(State state) { qFinals.insert(state); }
 	void SetPsi(State state, OutputMonoid::Value v) { output[state] = std::move(v); }
 
@@ -201,13 +200,8 @@ class SparseSSFST {
 	}
 
 	void printInfo(std::ostream &out) const {
-		out << std::format("SparseSSFST has {} states and {} transitions.\n", N, transitions.size());
-		out << std::format("Average transitions per state: {:.2f}\n", static_cast<double>(transitions.size()) / N);
-		out << std::format("Number of final states: {}\n", qFinals.size());
-		if constexpr (requires { get<1>(monoid).totalWordCount(); })
-			out << std::format("Words stored: {}\n", get<1>(monoid).totalWordCount());
-		if constexpr (requires { get<1>(monoid).poolByteCount(); })
-			out << std::format("Words cache size: {}\n", get<1>(monoid).poolByteCount());
+		out << "Subsequential Finite-State Transducer: |Q| = " << N << ", |Δ| = " << transitions.size()
+			<< ", |F| = " << qFinals.size() << "\n";
 	}
 
 	friend class OutputFSA<Symbol>;
@@ -216,7 +210,8 @@ class SparseSSFST {
 /// Subsequentialization of a real-time FST by subset construction: each state of the result is a set of
 /// (input state, pending output delay) pairs. Throws if the output delays are unbounded.
 template <SSFST_builder TOut, FST_with_arcs T>
-	requires(free_monoid<get_input_t<T>> && std::same_as<typename get_input_t<T>::Value, typename get_input_t<T>::Symbol>)
+	requires(free_monoid<get_input_t<T>> &&
+			 std::same_as<typename get_input_t<T>::Value, typename get_input_t<T>::Symbol>)
 TOut subsequentializeFST(const T &fst, bool resolveNonFunctionality = false) {
 	using InState	   = typename T::State;
 	using Symbol	   = typename get_input_t<T>::Symbol;
@@ -228,16 +223,16 @@ TOut subsequentializeFST(const T &fst, bool resolveNonFunctionality = false) {
 
 	static_assert(ordered_monoid<OutputMonoid>, "Output monoid must be comparable for sorting");
 
-	TOut ssft;
+	TOut		ssft;
 	const auto &outMonoid = get<1>(ssft.GetMonoid());
 	const auto &inMonoid  = get<1>(fst.GetMonoid());
 
-	std::size_t C		 = inMonoid.C();
+	std::size_t C		  = inMonoid.C();
 	auto		MAX_DELAY = C * fst.Size() * fst.Size();	 // C * |Q|^2
 	std::size_t curr_max  = 0;
 
 	std::vector<std::reference_wrapper<const BigState>> states;
-	std::map<BigState, State>		stateMap;
+	std::map<BigState, State>							stateMap;
 	std::stack<State>									queue;
 
 	const State init = ssft.NewState();
@@ -262,11 +257,11 @@ TOut subsequentializeFST(const T &fst, bool resolveNonFunctionality = false) {
 	struct Pending {
 		Symbol		symbol;
 		OutValue	output;
-		std::size_t next;	 // index into nextStates
+		std::size_t next;	  // index into nextStates
 	};
-	std::vector<BigState>						nextStates;
-	std::vector<Pending>						pending;
-	fl::unordered_map<Symbol, std::size_t>		pendingIndex;
+	std::vector<BigState>				   nextStates;
+	std::vector<Pending>				   pending;
+	fl::unordered_map<Symbol, std::size_t> pendingIndex;
 
 	std::cout << std::endl;
 	while (!queue.empty()) {
@@ -277,9 +272,9 @@ TOut subsequentializeFST(const T &fst, bool resolveNonFunctionality = false) {
 
 		for (const auto &[q, delay] : currentState) {
 			for (const auto &[val, next] : fst.Transitions(q)) {
-				const auto &[s, w]	  = val;
-				auto		currentOutput = outMonoid.own(inMonoid, w);
-				auto		wordToDelay	  = outMonoid.mul(delay, currentOutput);
+				const auto &[s, w] = val;
+				auto currentOutput = outMonoid.own(inMonoid, w);
+				auto wordToDelay   = outMonoid.mul(delay, currentOutput);
 
 				auto it = pendingIndex.find(s);
 				if (it == pendingIndex.end()) {
@@ -307,8 +302,7 @@ TOut subsequentializeFST(const T &fst, bool resolveNonFunctionality = false) {
 		for (std::size_t i = 0; i < nextStates.size(); ++i) {
 			BigState &nextState = nextStates[i];
 			std::sort(nextState.begin(), nextState.end());
-			nextState.erase(std::unique(nextState.begin(), nextState.end()),
-							nextState.end());
+			nextState.erase(std::unique(nextState.begin(), nextState.end()), nextState.end());
 
 			auto found = stateMap.find(nextState);
 			if (found != stateMap.end()) {
@@ -325,21 +319,23 @@ TOut subsequentializeFST(const T &fst, bool resolveNonFunctionality = false) {
 				if (!fst.IsFinal(q)) continue;
 
 				if (finalOut && !outMonoid.equal(delay, *finalOut)) {
-					if (!resolveNonFunctionality)
-						throw std::runtime_error(
-							std::format("Non-functionality detected at state {} between outputs {} and {}", newIndex,
-										print_if_can(outMonoid, delay), print_if_can(outMonoid, *finalOut)));
+					if constexpr (dbg::enabled)
+						if (!resolveNonFunctionality)
+							throw std::runtime_error(std::format(
+								"Non-functionality detected at state {} between outputs {} and {}", newIndex,
+								print_if_can(outMonoid, delay), print_if_can(outMonoid, *finalOut)));
 
 					assert(bestOutToKeep);
 					bool bestHasFuture = !std::ranges::empty(fst.Transitions(*bestOutToKeep));
 					bool currHasFuture = !std::ranges::empty(fst.Transitions(q));
-					std::cout << "conflict at state " << newIndex << " between outputs "
-							  << print_if_can(outMonoid, *finalOut) << " and " << print_if_can(outMonoid, delay)
-							  << std::endl;
+					if constexpr (dbg::enabled)
+						std::cout << "conflict at state " << newIndex << " between outputs "
+								  << print_if_can(outMonoid, *finalOut) << " and " << print_if_can(outMonoid, delay)
+								  << std::endl;
 
 					if (bestHasFuture && currHasFuture)
 						throw std::runtime_error("Failed to resolve non-functionality, both outputs have perspective");
-					else if (currHasFuture) continue;	 // do not write
+					else if (currHasFuture) continue;	  // do not write
 				}
 				finalOut	  = delay;
 				bestOutToKeep = q;
@@ -355,14 +351,16 @@ TOut subsequentializeFST(const T &fst, bool resolveNonFunctionality = false) {
 			queue.push(newIndex);
 		}
 
-		for (const auto &p : pending) ssft.AddTransition(current, Value{p.symbol, p.output}, stateRemap[p.next]);
+		for (const auto &p : pending)
+			ssft.AddTransition(current, Value{p.symbol, p.output}, stateRemap[p.next]);
 
-		sd.do_thing([&]() {
-			std::cout << "\rCurrent max delay: " << curr_max << " Current states count: " << states.size()
-					  << " Upper bound: " << MAX_DELAY
-					  << " Mean states in SparseSSFST state: " << (double)processedStates / (double)states.size()
-					  << std::flush;
-		});
+		if constexpr (dbg::enabled)
+			sd.do_thing([&]() {
+				std::cout << "\rCurrent max delay: " << curr_max << " Current states count: " << states.size()
+						  << " Upper bound: " << MAX_DELAY
+						  << " Mean states in SparseSSFST state: " << (double)processedStates / (double)states.size()
+						  << std::flush;
+			});
 
 		nextStates.clear();
 		pending.clear();

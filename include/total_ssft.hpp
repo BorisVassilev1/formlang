@@ -112,8 +112,8 @@ class TotalSSFST {
 		transitions[from][size_t(letter)] = {outputID, to};
 	}
 
-	void AddInitial(State state) { assert(state == 0); }	 /// only state 0 is initial
-	void AddFinal(State state) { assert(state < N); }		 /// all states are final
+	void AddInitial([[maybe_unused]] State state) { assert(state == 0); }	  /// only state 0 is initial
+	void AddFinal([[maybe_unused]] State state) { assert(state < N); }		  /// all states are final
 	void SetInitialOutput(OutValue v) { initialOut = std::move(v); }
 	void SetPsi(State state, OutValue v) {
 		assert(state < N);

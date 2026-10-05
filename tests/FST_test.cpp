@@ -71,7 +71,7 @@ void test_bounded_variation() {
 	}
 
 	try {
-		SSFST_t<Letter> ssft = subsequentializeFST<SSFST_t<Letter>>(crochemorePseudoMinimizeFST(pseudoDeterminizeFST(efst)));
+		SSFST_t<Letter> ssft = subsequentializeFST<SSFST_t<Letter>>(pseudoMinimizeFST(pseudoDeterminizeFST(efst)));
 		statFSA(ssft);
 
 		std::cout << "draw SSFT" << std::endl;

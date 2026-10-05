@@ -79,7 +79,7 @@ class SymbolMonoid : eps_holder<_Symbol> {
 		return s;
 	}
 
-	constexpr Value sub(Value a, std::size_t start, std::size_t len) const {
+	constexpr Value sub(Value a, [[maybe_unused]] std::size_t start, std::size_t len) const {
 		assert(start <= 1 && start + len <= 1 && "SymbolMonoid::sub: input range has length > 1");
 		if (len == 0) return identity;
 		return a;

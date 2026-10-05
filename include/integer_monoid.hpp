@@ -31,7 +31,7 @@ class IntegerMonoid {
 	}
 
 	constexpr Value from(range_of<Symbol> auto &&r) const { return std::ranges::distance(r); }
-	constexpr Value sub(Value a, std::size_t start, std::size_t len) const {
+	constexpr Value sub([[maybe_unused]] Value a, [[maybe_unused]] std::size_t start, std::size_t len) const {
 		assert(start <= std::size_t(a) && start + len <= std::size_t(a));
 		return len;
 	}

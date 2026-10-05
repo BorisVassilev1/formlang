@@ -2,6 +2,7 @@
 #include <string>
 
 #include "formlang.hpp"
+#include "ssft.hpp"
 
 using namespace std::string_literals;
 
@@ -48,67 +49,75 @@ auto K	= "(" + rgx::identity("abcde") + ")*.<'abcabcaab', ':))'>"s;
 auto R2 = std::format("({})!", N1);
 auto R3 = std::format("({})!", N2);
 
-/* test:
-M MC MMMI MD MM MCML MMMCMXCIX
-*/
-
-int main() {
+inline std::optional<fl::SparseSSFST<fl::Letter>> test_regex(const std::string &reg) {
 	using namespace fl;
-	std::cout << "regex: " << N << std::endl;
+	// std::cout << "regex: " << reg << std::endl;
 
-	auto regex = rgx::parseRegex(N);
+	auto regex = rgx::parseRegex(reg);
 	auto fst   = (StringFST<Letter>)makeFSA_BerriSethi<Letter>(*regex);
 	fst		   = trimFSA(std::move(fst));
 
-	std::cout << "FSA has " << fst.N << " states and " << fst.transitions.size() << " transitions." << std::endl;
+	statFSA(fst);
 
 	bool infAmb = testInfiniteAmbiguity(fst);
-	drawFSA(fst);
-	std::cout << "infinite ambiguity: " << infAmb << std::endl;
+	// drawFSA(fst);
 	if (infAmb) {
 		std::cerr << "The FSA is infinitely ambiguous!" << std::endl;
-		return 1;
-	}
+		return std::nullopt;
+	} else std::cout << "The FSA is not infinitely ambiguous." << std::endl;
 
 	auto realtime = realtimeFST(std::move(fst));
 	realtime	  = crochemorePseudoMinimizeFST(pseudoDeterminizeFST(realtime));
-	std::cout << "realtime FST has " << realtime.N << " states and " << realtime.transitions.size() << " transitions."
-			  << std::endl;
-	// drawFSA(realtime);
+	//  drawFSA(realtime);
+	statFSA(realtime);
 
-	std::cout << "testing functionality..." << std::endl;
 	bool func = isFunctional(realtime);
-	std::cout << "functionality: " << func << std::endl;
 	if (!func) {
 		std::cerr << "The FST is not functional!" << std::endl;
-		return 1;
-	}
+		return std::nullopt;
+	} else std::cout << "The FST is functional." << std::endl;
 
-	// bool bvar = testBoundedVariation(realtime);
-	// std::cout << "bounded variation: " << bvar << std::endl;
-	// if (!bvar) {
-	//	std::cerr << "The FST does not satisfy bounded variation!" << std::endl;
-	//	return 1;
-	// }
+	bool bvar = testBoundedVariation(realtime);
+	if (!bvar) {
+		std::cerr << "The FST has not bounded variation!" << std::endl;
+		return std::nullopt;
+	} else std::cout << "The FST has bounded variation." << std::endl;
 
 	try {
 		std::cout << "converting to SSFT..." << std::endl;
 		auto ssfst = subsequentializeFST<SparseSSFST<Letter>>(realtime);
-		drawFSA(ssfst);
+		// drawFSA(ssfst);
+		statFSA(ssfst);
 
-		std::cout << "SSFT has " << ssfst.Size() << " states and " << ssfst.Transitions().size() << " transitions."
-				  << std::endl;
-
-		std::string input;
-		std::getline(std::cin, input);
-		auto [result, b] = ssfst.f(toSymbol<Letter>(input));
-		if (b) {
-			std::cout << "output len: " << result.size() << std::endl;
-			std::cout << "Input accepted: " << result << std::endl;
-		} else {
-			std::cout << "Input rejected." << std::endl;
-		}
+		return ssfst;
 	} catch (const std::exception &e) { std::cerr << "Error: " << e.what() << std::endl; }
+	return std::nullopt;
+}
 
+int main() {
+	if constexpr (dbg::enabled) { std::cout << "DEBUG MODE ENABLED" << std::endl; }
+
+	std::cout << "\nN: " << std::endl;
+	test_regex(N);
+	std::cout << "\nR: " << std::endl;
+	test_regex(R);
+	std::cout << "\nB: " << std::endl;
+	auto res = test_regex(B);
+	std::cout << "\nS: " << std::endl;
+	test_regex(S);
+	std::cout << "\nN1+: " << std::endl;
+	test_regex(R2);
+	std::cout << "\nN2+: " << std::endl;
+	test_regex(R3);
+
+	const auto &ssfst = *res;
+
+	auto [result, b] = ssfst.f(fl::toSymbol<fl::Letter>("M MC MMMI MD MM MCML MMMCMXCIX"));
+	if (b) {
+		std::cout << "output len: " << result.size() << std::endl;
+		std::cout << "Input accepted: " << result << std::endl;
+	} else {
+		std::cout << "Input rejected." << std::endl;
+	}
 	return 0;
 }

@@ -10,7 +10,7 @@
 
 namespace dbg {
 
-#ifndef _NDEBUG
+#ifndef NDEBUG
 constexpr bool enabled = true;
 #else
 constexpr bool enabled = false;

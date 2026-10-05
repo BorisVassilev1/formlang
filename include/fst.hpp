@@ -85,6 +85,15 @@ class SparseFST {
 		return get<0>(monoid).totalWordCount() + (isDiagonal ? 0 : get<1>(monoid).totalWordCount());
 	}
 
+	void printInfo(std::ostream &out) const {
+		out << "Finite State Transducer: |Q| = " << N << ", |Δ| = " << transitions.size()
+			<< ", |F| = " << qFinals.size() << "\n";
+		// if constexpr (requires { get<1>(monoid).totalWordCount(); })
+		//	out << "Words stored: " << get<1>(monoid).totalWordCount() << "\n";
+		// if constexpr (requires { get<1>(monoid).poolByteCount(); })
+		//	out << "Words cache size: " << get<1>(monoid).poolByteCount() << "\n";
+	}
+
 	void print(std::ostream &out) const {
 		// print in DOT
 		out << "digraph FST {\n";
@@ -138,6 +147,11 @@ inline void saveFSA(const SparseFST<I, M> &fsa, const std::string &filename) {
 	if (!out.is_open()) { throw std::runtime_error("Could not open file " + filename + " for writing."); }
 	fsa.print(out);
 	out.close();
+}
+
+template <free_monoid I, monoid M>
+inline void statFSA(const SparseFST<I, M> &fsa, std::ostream &out = std::cout) {
+	fsa.printInfo(out);
 }
 
 template <free_monoid I, monoid M>
