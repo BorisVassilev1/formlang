@@ -11,6 +11,7 @@
 #include "utils_macros.hpp"
 #include "regex_parser.hpp"
 #include "expanded_fst.hpp"
+#include "realtime.hpp"
 
 using namespace fl;
 
@@ -89,13 +90,13 @@ int main(int argc, char **argv) {
 			  << fst.wordCount() << " words after trimming." << std::endl;
 
 	ExpandedFST<Letter, InterningMonoid<Letter>> efst;
-	BENCH(efst = expandFST(std::move(fst));, 1, "BENCH expandFST: ");
+	BENCH(efst = expandFST<decltype(efst)>(std::move(fst));, 1, "BENCH expandFST: ");
 	if (tokens.size() < 1000) drawFSA(efst);
 	std::cout << "Expanded FSA has " << efst.N << " states and " << efst.transitions.size() << " transitions."
 			  << std::endl;
 
 	if (!infAmbiguity) {
-		BENCH(efst = removeUpperEpsilonFST<Letter>(std::move(efst));, 1, "BENCH realtimeFST: ");
+		BENCH(efst = removeUpperEpsilonFST(std::move(efst));, 1, "BENCH realtimeFST: ");
 		if (tokens.size() < 1000) drawFSA(efst);
 		std::cout << "Real-time FSA has " << efst.N << " states and " << efst.transitions.size() << " transitions."
 				  << std::endl;

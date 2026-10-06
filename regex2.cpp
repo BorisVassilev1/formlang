@@ -1,6 +1,7 @@
 #include <iostream>
 #include <string>
 
+#include "canonical.hpp"
 #include "formlang.hpp"
 #include "ssft.hpp"
 
@@ -66,7 +67,7 @@ inline std::optional<fl::SparseSSFST<fl::Letter>> test_regex(const std::string &
 		return std::nullopt;
 	} else std::cout << "The FSA is not infinitely ambiguous." << std::endl;
 
-	auto realtime = realtimeFST(std::move(fst));
+	auto realtime = realtimeFSTAuto(std::move(fst));
 	realtime	  = crochemorePseudoMinimizeFST(pseudoDeterminizeFST(realtime));
 	//  drawFSA(realtime);
 	statFSA(realtime);

@@ -37,6 +37,7 @@ set(FL_TARGETS
 	replace_test
 	monoid_test
 	concept_checks
+	canonical_test
 )
 
 foreach(target IN LISTS FL_TARGETS)
@@ -82,6 +83,10 @@ add_test(NAME cfg_test
 add_test(NAME concept_checks
 	COMMAND concept_checks
 	DEPENDS concept_checks)
+
+add_test(NAME canonical_test
+	COMMAND canonical_test
+	DEPENDS canonical_test)
 
 
 add_custom_target(DPDA_check COMMAND ${CMAKE_CTEST_COMMAND}

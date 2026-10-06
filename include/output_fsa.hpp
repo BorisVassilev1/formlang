@@ -9,7 +9,7 @@
 
 #include "ssft.hpp"
 #include "expanded_fst.hpp"
-#include "fst.hpp"
+#include "realtime.hpp"
 #include "regex_parser.hpp"
 #include "interning_monoid.hpp"
 #include "cartesian_monoid.hpp"
@@ -36,7 +36,7 @@ class OutputFSA {
 		StringFST<Symbol> fst = makeFSA_BerriSethi<Symbol>(*ast);
 		fst					  = trimFSA(std::move(fst));
 
-		auto realtime = realtimeFST(std::move(fst));
+		auto realtime = realtimeFSTAuto(std::move(fst));
 		*this		  = OutputFSA<Symbol>(pseudoDeterminizeFST(std::move(realtime)), fixedOutput);
 	}
 

@@ -3,6 +3,7 @@
 #include <array>
 #include <vector>
 #include <ranges>
+#include <span>
 #include <optional>
 #include <iostream>
 
@@ -96,7 +97,28 @@ class TotalSSFST {
 				   return std::tuple(s, typename Monoid::Value{l, outputID}, next);
 			   });
 	}
+
+	[[clang::always_inline]] inline auto &RawTransitions() const { return transitions; }
+	[[clang::always_inline]] inline auto  RawTransitions()	&&{ return std::move(transitions); }
+
+	/// mutable, storage-backed view of every transition's output value -- unlike Transitions(),
+	/// which synthesizes a fresh tuple per element, this aliases the real Trans::outputID fields
+	/// so compact() can renumber them in place.
+	auto TransitionValues() & {
+		return transitions | std::views::join |
+			   std::views::transform([](Trans &t) -> OutValue & { return t.outputID; });
+	}
+
+	/// mutable, storage-backed view of every state's final output -- same role as
+	/// TransitionValues(), but for Psi rather than the transition labels.
+	auto PsiValues() & { return std::span<OutValue>(output); }
+
+	/// single-element mutable view of the initial output, for the same reason.
+	auto InitialOutputSpan() & { return std::span<OutValue>(&initialOut, 1); }
+
 	const Monoid &GetMonoid() const { return monoid; }
+	Monoid		 &GetMonoid()		&{ return monoid; }
+	Monoid		&&GetMonoid()	   &&{ return std::move(monoid); }
 
 	//////////////// builder interface //////////////////////
 

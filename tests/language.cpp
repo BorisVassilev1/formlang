@@ -12,6 +12,7 @@
 
 #include "cfg.hpp"
 #include "earley.hpp"
+#include "fst_from_regex.hpp"
 #include "lex_traverser.hpp"
 #include "output_fsa.hpp"
 #include "utils_macros.hpp"
@@ -165,7 +166,7 @@ auto createTokenizer() {
 	OutputFSA<Token> exclamation{"'!'", '!'};
 
 	OutputFSA<Token> whitespace{"(' '+'\n'+'\t'+'\r')!", WS};
-	OutputFSA<Token> eof{realtimeFST(BS_WordFSA<Token>({Token::eof}, {})),
+	OutputFSA<Token> eof{realtimeFSTAuto((StringFST<Token>)BS_WordFSA<Token>({Token::eof}, {})),
 						 Token::eof};	  // hacky but regexes do not support EOF
 
 	auto tokenizer = UnionOutputFSA<Token>(
@@ -182,8 +183,8 @@ auto createTokenizer() {
 
 std::pair<std::vector<Token>, WordSet<Token>> tokenize(std::vector<Token> &text) {
 	static fl::SparseSSFST<Token> tokenizer = createTokenizer();
-	std::vector<Token>	   tokens;
-	WordSet<Token>		   words;
+	std::vector<Token>			  tokens;
+	WordSet<Token>				  words;
 
 	for (auto token : LexerRange(text, tokenizer, Error)) {
 		if (token.token == WS) continue;

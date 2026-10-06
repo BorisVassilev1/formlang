@@ -119,7 +119,9 @@ class ExpandedFST {
 		out << "Expanded FST: |Q| = " << N << ", |Δ| = " << transitions.size() << ", |F| = " << qFinals.size() << "\n";
 	}
 
-	const auto &GetMonoid() const { return monoid; }
+	const Monoid &GetMonoid() const { return monoid; }
+	Monoid		 &GetMonoid()		&{ return monoid; }
+	Monoid		&&GetMonoid()	   &&{ return std::move(monoid); }
 
 	const auto &Initial() const { return qFirsts; }
 	auto		Initial()		 &&{ return std::move(qFirsts); }
@@ -140,6 +142,16 @@ class ExpandedFST {
 				   return std::make_tuple(pair.first, label, to);
 			   });
 	}
+
+	auto &RawTransitions() & { return transitions; }
+	auto  RawTransitions()	&&{ return std::move(transitions); }
+
+	/// mutable, storage-backed view of every transition's output value -- see
+	/// TotalSSFST::TransitionValues() for why this can't go through Transitions().
+	auto TransitionValues() & {
+		return transitions | std::views::values |
+			   std::views::transform([](auto &labelAndTo) -> auto & { return std::get<1>(std::get<0>(labelAndTo)); });
+	}
 };
 
 template <symbol Symbol, monoid M>
@@ -157,272 +169,6 @@ template <class Map>
 auto transitionValues(Map &transitions) {
 	return transitions | std::views::values |
 		   std::views::transform([](auto &labelAndTo) -> auto & { return std::get<1>(std::get<0>(labelAndTo)); });
-}
-
-/// expands the transducer. in the case where output is longer than input,
-/// it will leave a whole excess word on the output tape to save space.
-template <FST T>
-auto expandFST(T &&fst) {
-	using I		 = get_input_t<T>;
-	using M		 = get_output_t<T>;
-	using Symbol = I::Symbol;
-
-	ExpandedFST<Symbol, M> expanded;
-	using State		  = typename ExpandedFST<Symbol, M>::State;
-	using OutValue	  = typename ExpandedFST<Symbol, M>::OutValue;
-	using ResultValue = typename ExpandedFST<Symbol, M>::Monoid::Value;
-
-	expanded.N		 = fst.Size();
-	expanded.qFirsts = std::move(fst.Initial());
-	expanded.qFinals = std::move(fst.Final());
-
-	// const auto &inMonoid  = get<0>(expanded.GetMonoid());
-	const auto &outMonoid = get<1>(expanded.GetMonoid());
-
-	for (const auto &[from, label, to] : fst.Transitions()) {
-		auto [w1, w2] = fst.GetMonoid().gen(label);
-		if (fst.template isIdentityOnTape<0>(label)) {
-			OutValue new_val = outMonoid.own(get<1>(fst.monoid), std::get<1>(label));
-			expanded.AddTransition(from, ResultValue{Symbol::eps, new_val}, to);
-			continue;
-		}
-		State prev = from;
-
-		if (w1.size() < w2.size()) {	 // |w1| < |w2|
-			assert(w2.size() > 0);
-			auto i1 = w1.begin();
-			auto i2 = w2.begin();
-			for (uint32_t i = 0; i < w1.size() - 1; ++i) {
-				const auto &a	  = *i1++;
-				const auto &b	  = *i2++;
-				State		next  = (i1 == w1.end()) ? to : expanded.NewState();
-				OutValue	w2val = outMonoid.from(std::span{&b, 1});
-				expanded.AddTransition(prev, ResultValue{a, w2val}, next);
-				prev = next;
-			}
-			OutValue w2val = outMonoid.from(std::ranges::subrange(i2, w2.end()));
-			expanded.AddTransition(prev, ResultValue{*i1, w2val}, to);
-		} else {
-			auto i1 = w1.begin();
-			auto i2 = w2.begin();
-			while (i2 != w2.end()) {
-				const auto &a	  = *i1++;
-				const auto &b	  = *i2++;
-				State		next  = (i2 == w2.end() && i1 == w1.end()) ? to : expanded.NewState();
-				OutValue	w2val = outMonoid.from(std::span{&b, 1});
-				expanded.AddTransition(prev, ResultValue{a, w2val}, next);
-				prev = next;
-			}
-			while (i1 != w1.end()) {
-				const auto &a	 = *i1++;
-				State		next = (i1 == w1.end()) ? to : expanded.NewState();
-				expanded.AddTransition(prev, ResultValue{a, outMonoid.identity}, next);
-				prev = next;
-			}
-		}
-	}
-
-	return expanded;
-}
-
-// https://lml.bas.bg/~stoyan/finite-state-techniques.pdf#theorem.4.4.8
-template <symbol Symbol, monoid M>
-auto removeUpperEpsilonFST(ExpandedFST<Symbol, M> &&fsa) {
-	using FSA_t	   = ExpandedFST<Symbol, M>;
-	using State	   = typename FSA_t::State;
-	using OutValue = typename FSA_t::OutValue;
-
-	auto &outMonoid = get<1>(fsa.monoid);
-
-	std::stack<int>													 stack;
-	std::vector<bool>												 visited(fsa.N, false);
-	std::vector<std::vector<std::tuple<State, std::vector<Symbol>>>> closure(fsa.N);	 // TODO: this is slow
-
-	for (State i = 0; i < fsa.N; ++i) {
-		stack.push(0);
-		visited[i] = true;
-		closure[i].push_back({i, {}});	   // add the state itself with an empty word
-		while (!stack.empty()) {
-			auto p = stack.top();
-			// copy, not reference: closure[i] gets push_back'ed to below (possibly
-			// reallocating), which would leave a `const auto&` binding here dangling
-			// once a state has more than one outgoing epsilon edge.
-			auto [current, u] = closure[i][p];
-			stack.pop();
-
-			auto [i1, i2] = fsa.transitions.equal_range(current);
-			for (const auto &[_, value] : std::ranges::subrange(i1, i2)) {
-				const auto &[label, to] = value;
-				const auto &[w1, w2]	= label;
-				if (w1 == Symbol::eps && !visited[to]) {	 // epsilon transition
-					visited[to]	  = true;
-					auto new_word = u;
-					auto gw2	  = outMonoid.gen(w2);
-					new_word.insert(new_word.end(), gw2.begin(), gw2.end());
-					closure[i].push_back({to, std::move(new_word)});
-					stack.push(closure[i].size() - 1);
-				}
-			}
-		}
-
-		visited.assign(fsa.N, false);
-	}
-
-	for (const auto &i : fsa.qFirsts) {
-		for (const auto &[c, w] : closure[i]) {
-			if (fsa.qFinals.contains(c)) {
-				fsa.qFinals.insert(i);
-				fsa.addFEps(outMonoid.from(w));		// f(eps)
-			}
-		}
-	}
-
-	std::erase_if(fsa.transitions, [](const auto &pair) {
-		const auto &[from, value] = pair;
-		const auto &[label, to]	  = value;
-		const auto &[w1, w2]	  = label;
-		return w1 == Symbol::eps;	  // remove epsilon transitions
-	});
-
-	typename FSA_t::Map new_transitions;
-	for (State q1 = 0; q1 < fsa.N; ++q1) {
-		for (const auto &[q_, u] : closure[q1]) {
-			auto [i1, i2] = fsa.transitions.equal_range(q_);
-			for (const auto &[_, value] : std::ranges::subrange(i1, i2)) {
-				const auto &[label, q__] = value;
-				const auto &[sigma, w2]	 = label;
-				auto v					 = outMonoid.gen(w2);
-				for (const auto &[q2, w] : closure[q__]) {
-					auto new_word = u;
-					new_word.insert(new_word.end(), v.begin(), v.end());
-					new_word.insert(new_word.end(), w.begin(), w.end());
-					OutValue new_val = outMonoid.from(new_word);
-					new_transitions.insert({q1, {typename FSA_t::Value(sigma, new_val), q2}});
-				}
-			}
-		}
-	}
-	fsa.transitions = std::move(new_transitions);
-
-	// the epsilon-labeled transitions erased above may have been the only
-	// reference to some pool entries (e.g. the output word carried along a
-	// now-removed epsilon hop) -- reclaim them.
-	if constexpr (compactable_monoid<typename FSA_t::Monoid>) {
-		get<1>(fsa.monoid).compact(transitionValues(fsa.transitions), fsa.f_eps);
-	}
-
-	return std::move(fsa);
-}
-
-/// Trims the FSA
-template <symbol Symbol, monoid M>
-auto trimFSA(ExpandedFST<Symbol, M> &&fsa) {
-	using State	 = typename ExpandedFST<Symbol, M>::State;
-	using Monoid = typename ExpandedFST<Symbol, M>::Monoid;
-
-	if (fsa.qFinals.empty()) {
-		fsa.N		= 0;
-		fsa.qFirsts = {0};
-		fsa.transitions.clear();
-		if constexpr (compactable_monoid<Monoid>) { get<1>(fsa.monoid).compact(fsa.f_eps); }
-		return std::move(fsa);
-	}
-
-	std::vector<bool> visited_back(fsa.N, false);
-	std::vector<bool> visited_forw(fsa.N, false);
-
-	{
-		auto						   &forwardTransitions = fsa.transitions;
-		std::vector<std::vector<State>> backwardTransitions;
-		backwardTransitions.resize(fsa.N);
-		for (const auto &[from, value] : forwardTransitions) {
-			const auto &[label, to] = value;
-			backwardTransitions[to].push_back(from);
-		}
-
-		std::vector<State> stack;
-		if (fsa.qFinals.size() != fsa.N) {
-			for (const auto &final : fsa.qFinals) {
-				visited_back[final] = true;
-				stack.push_back(final);
-			}
-			while (!stack.empty()) {
-				State current = stack.back();
-				stack.pop_back();
-				for (const auto &next : backwardTransitions[current]) {
-					if (!visited_back[next]) {
-						visited_back[next] = true;
-						stack.push_back(next);
-					}
-				}
-			}
-		} else {
-			std::fill(visited_back.begin(), visited_back.end(), true);
-		}
-
-		for (const auto &first : fsa.qFirsts) {
-			visited_forw[first] = true;		// mark initial states as visited
-			stack.push_back(first);
-		}
-		while (!stack.empty()) {
-			State current = stack.back();
-			stack.pop_back();
-			auto [i1, i2] = forwardTransitions.equal_range(current);
-			for (const auto &[_, value] : std::ranges::subrange(i1, i2)) {
-				const auto &[label, to] = value;
-				if (!visited_forw[to]) {
-					visited_forw[to] = true;
-					stack.push_back(to);
-				}
-			}
-		}
-	}
-
-	std::size_t		   cnt = 0;
-	std::vector<State> new_map(fsa.N, -1);
-	for (unsigned int i = 0; i < fsa.N; ++i) {
-		if (visited_back[i] && visited_forw[i]) { new_map[i] = cnt++; }
-	}
-
-	if (cnt == fsa.N) {
-		if constexpr (compactable_monoid<Monoid>) {
-			get<1>(fsa.monoid).compact(transitionValues(fsa.transitions), fsa.f_eps);
-		}
-		return std::move(fsa);
-	}
-
-	ExpandedFST<Symbol, M> new_fsa;
-	new_fsa.monoid = std::move(fsa.monoid);
-	new_fsa.N	   = cnt;
-	new_fsa.qFirsts.reserve(fsa.qFirsts.size());
-	for (const auto &q : fsa.qFirsts) {
-		if (new_map[q] != -1u) { new_fsa.qFirsts.insert(new_map[q]); }
-	}
-
-	new_fsa.qFinals.reserve(fsa.qFinals.size());
-	for (const auto &q : fsa.qFinals) {
-		if (new_map[q] != -1u) { new_fsa.qFinals.insert(new_map[q]); }
-	}
-
-	new_fsa.f_eps = std::move(fsa.f_eps);
-
-	for (const auto &[from, value] : fsa.transitions) {
-		const auto &[label, to] = value;
-		if (new_map[from] != -1u && new_map[to] != -1u) {
-			new_fsa.transitions.insert({new_map[from], {label, new_map[to]}});
-		}
-	}
-
-	if constexpr (compactable_monoid<Monoid>) {
-		get<1>(new_fsa.monoid).compact(transitionValues(new_fsa.transitions), new_fsa.f_eps);
-	}
-
-	return std::move(new_fsa);
-}
-
-template <FSA T>
-auto realtimeFST(T &&fst) {
-	return trimFSA(removeUpperEpsilonFST(expandFST(removeEpsilonFST(trimFSA(std::move(fst))))));
 }
 
 /// Pseudo-determinization of any real-time FST
@@ -609,8 +355,27 @@ auto crochemorePseudoMinimizeFST(const T &fst) {
 	}
 
 	std::vector<std::size_t> block(states.size());
-	for (std::size_t i = 0; i < states.size(); ++i)
-		block[i] = fst.IsFinal(states[i]) ? 1 : 0;
+	if constexpr (SSFST<T>) {
+		// Two states with identical transition structure but different final output (Psi)
+		// still produce a different language, so they must never merge -- Psi joins IsFinal
+		// as part of the initial seed that partition refinement is forbidden from crossing.
+		using PsiOutputMonoid = get_output_t<T>;
+		using PsiValue		  = typename PsiOutputMonoid::Value;
+		const auto &outMonoid = get<1>(fstMonoid);
+		std::unordered_map<PsiValue, std::size_t, monoid_hash<PsiOutputMonoid>, monoid_equal<PsiOutputMonoid>> psiIds(
+			0, monoid_hash<PsiOutputMonoid>(&outMonoid), monoid_equal<PsiOutputMonoid>(&outMonoid));
+		for (std::size_t i = 0; i < states.size(); ++i) {
+			if (!fst.IsFinal(states[i])) {
+				block[i] = 0;
+				continue;
+			}
+			auto [it, _] = psiIds.try_emplace(fst.Psi(states[i]), psiIds.size());
+			block[i]	 = 1 + it->second;
+		}
+	} else {
+		for (std::size_t i = 0; i < states.size(); ++i)
+			block[i] = fst.IsFinal(states[i]) ? 1 : 0;
+	}
 
 	std::size_t blockCount = 0;
 	while (true) {
@@ -641,7 +406,11 @@ auto crochemorePseudoMinimizeFST(const T &fst) {
 
 	for (std::size_t b = 0; b < blockCount; ++b) {
 		std::size_t i = representative[b];
-		if (fst.IsFinal(states[i])) result.AddFinal(b);
+		if (fst.IsFinal(states[i])) {
+			result.AddFinal(b);
+			if constexpr (SSFST<T> && SSFST_builder<Result>)
+				result.SetPsi(b, get<1>(result.GetMonoid()).own(get<1>(fstMonoid), fst.Psi(states[i])));
+		}
 		for (const auto &[label, to] : edges[i]) {
 			result.AddTransition(b, result.GetMonoid().own(fstMonoid, labels[label]), block[to]);
 		}
@@ -654,10 +423,18 @@ auto crochemorePseudoMinimizeFST(const T &fst) {
 			result.addFEps(get<1>(result.monoid).own(get<1>(fstMonoid), v));
 	}
 
+	if constexpr (SSFSTI<T> && SSFSTI_builder<Result>)
+		result.SetInitialOutput(get<1>(result.GetMonoid()).own(get<1>(fstMonoid), fst.InitialOutput()));
+
 	if constexpr (compactable_monoid<typename Result::Monoid>) {
-		if constexpr (requires { fst.f_eps; })
-			get<1>(result.monoid).compact(transitionValues(result.transitions), result.f_eps);
-		else get<1>(result.monoid).compact(transitionValues(result.transitions));
+		if constexpr (requires { result.f_eps; })
+			get<1>(result.GetMonoid()).compact(result.TransitionValues(), result.f_eps);
+		else if constexpr (SSFSTI_builder<Result>)
+			get<1>(result.GetMonoid())
+				.compact(result.TransitionValues(), result.PsiValues(), result.InitialOutputSpan());
+		else if constexpr (SSFST_builder<Result>)
+			get<1>(result.GetMonoid()).compact(result.TransitionValues(), result.PsiValues());
+		else get<1>(result.GetMonoid()).compact(result.TransitionValues());
 	}
 
 	return result;
@@ -667,6 +444,11 @@ template <FST_with_arcs T>
 	requires FSA_builder<T>
 auto pseudoMinimizeFST(const T &fst) {
 	return crochemorePseudoMinimizeFST<T>(fst);
+}
+
+template <FSA T>
+auto realtimeFSTAuto(T &&fst) {
+	return realtimeFST<ExpandedFST<typename get_input_t<T>::Symbol, get_output_t<T>>>(std::forward<T>(fst));
 }
 
 }	  // namespace fl

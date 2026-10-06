@@ -67,7 +67,7 @@ int main() {
 		return 1;
 	}
 
-	auto realtime = realtimeFST(std::move(fst));
+	auto realtime = realtimeFSTAuto(std::move(fst));
 	realtime = crochemorePseudoMinimizeFST(pseudoDeterminizeFST(realtime));
 	std::cout << "realtime FST has " << realtime.N << " states and " << realtime.transitions.size() << " transitions."
 			  << std::endl;

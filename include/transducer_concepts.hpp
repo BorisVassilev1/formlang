@@ -17,7 +17,8 @@ concept FSA = monoid<typename T::Monoid> && state<typename T::State> && requires
 	{ T::deterministic } -> std::convertible_to<bool>;
 
 	// exposes its monoid instance
-	{ t.GetMonoid() } -> std::same_as<const typename T::Monoid &>;
+	{ t.GetMonoid() } -> std::same_as<typename T::Monoid &>;
+	{ std::move(t).GetMonoid() } -> std::same_as<typename T::Monoid &&>;
 
 	// methods
 	{ t.Initial() } -> range_of<typename T::State>;
@@ -27,6 +28,9 @@ concept FSA = monoid<typename T::Monoid> && state<typename T::State> && requires
 	{ t.Size() } -> std::convertible_to<std::size_t>;
 
 	{ t.Transitions() } -> range_of<std::tuple<typename T::State, typename T::Monoid::Value, typename T::State>>;
+
+	{ std::move(t).RawTransitions() };
+	{ t.RawTransitions() };
 };
 
 template <class T>
@@ -101,6 +105,9 @@ concept FST_traversable = FST<T> && requires(T t, typename T::State s, typename 
 		t.Transition(s, l)
 	} -> std::convertible_to<std::optional<std::tuple<typename get_output_t<T>::Value, typename T::State>>>;
 };
+
+template <class T>
+concept FST_builder = FST<T> && FSA_builder<T>;
 
 /// A Subsequential Finite-State Transducer: a deterministic, real-time FST --
 /// transitions(s) is indexable directly by a T::InputMonoid::Symbol.

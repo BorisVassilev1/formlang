@@ -8,6 +8,7 @@
 #include "utils_macros.hpp"
 #include "ssft.hpp"
 #include "letter.hpp"
+#include "realtime.hpp"
 
 using namespace fl;
 
@@ -110,7 +111,7 @@ void test_replace() {
 		return;
 	}
 
-	auto fsa = expandFST(std::move(fst));
+	auto fsa = expandFST<ExpandedFST<Letter, InterningMonoid<Letter>>>(std::move(fst));
 	// drawFSA(fsa);
 	fsa = removeUpperEpsilonFST(std::move(fsa));
 	// drawFSA(fsa);

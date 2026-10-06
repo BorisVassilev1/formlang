@@ -69,7 +69,9 @@ class SparseSSFST {
 	void AddFinal(State state) { qFinals.insert(state); }
 	void SetPsi(State state, OutputMonoid::Value v) { output[state] = std::move(v); }
 
-	const auto &GetMonoid() const { return monoid; }
+	const Monoid &GetMonoid() const { return monoid; }
+	Monoid		 &GetMonoid()		&{ return monoid; }
+	Monoid		&&GetMonoid()	   &&{ return std::move(monoid); }
 
 	[[clang::always_inline]] inline std::size_t			 Size() const { return N; }
 	[[clang::always_inline]] inline std::array<State, 1> Initial() const { return {0}; }
@@ -94,6 +96,9 @@ class SparseSSFST {
 			return std::tuple(s, typename Monoid::Value{l, outputID}, to);
 		});
 	}
+
+	[[clang::always_inline]] inline auto &RawTransitions() & { return transitions; }
+	[[clang::always_inline]] inline auto  RawTransitions()	&&{ return std::move(transitions); }
 
 	auto f(const std::vector<OutSymbol> &input) const {
 		std::vector<OutSymbol> output;
