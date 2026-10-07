@@ -53,6 +53,13 @@ class SparseSSFST {
 	unsigned int				   N = 0;
 	unordered_map<State, OutValue> output;
 
+	auto TransitionValues() & {
+		return transitions | std::views::values |
+			   std::views::transform([](std::pair<OutValue, State> &t) -> OutValue & { return t.first; });
+	}
+
+	auto PsiValues() & { return std::views::values(output); }
+
    public:
 	SparseSSFST() : transitions(0) {}
 
@@ -99,6 +106,8 @@ class SparseSSFST {
 
 	[[clang::always_inline]] inline auto &RawTransitions() & { return transitions; }
 	[[clang::always_inline]] inline auto  RawTransitions()	&&{ return std::move(transitions); }
+
+	void CompactLabels() { get<1>(monoid).compact(TransitionValues(), PsiValues()); }
 
 	auto f(const std::vector<OutSymbol> &input) const {
 		std::vector<OutSymbol> output;

@@ -31,6 +31,8 @@ concept FSA = monoid<typename T::Monoid> && state<typename T::State> && requires
 
 	{ std::move(t).RawTransitions() };
 	{ t.RawTransitions() };
+
+	{ t.CompactLabels() } -> std::same_as<void>;
 };
 
 template <class T>

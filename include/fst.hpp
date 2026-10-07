@@ -142,6 +142,15 @@ class SparseFST {
 	auto &RawTransitions() & { return transitions; }
 	auto  RawTransitions()	&&{ return std::move(transitions); }
 
+   private:
+	auto TransitionValues() & {
+		return transitions | std::views::values |
+			   std::views::transform([](auto &labelAndTo) -> auto & { return std::get<0>(labelAndTo); });
+	}
+
+   public:
+	void CompactLabels() { monoid.compact(TransitionValues()); }
+
 	const Monoid &GetMonoid() const { return monoid; }
 	Monoid		 &GetMonoid()		&{ return monoid; }
 	Monoid		&&GetMonoid()	   &&{ return std::move(monoid); }

@@ -146,11 +146,16 @@ class ExpandedFST {
 	auto &RawTransitions() & { return transitions; }
 	auto  RawTransitions()	&&{ return std::move(transitions); }
 
-	/// mutable, storage-backed view of every transition's output value -- see
-	/// TotalSSFST::TransitionValues() for why this can't go through Transitions().
+   private:
 	auto TransitionValues() & {
 		return transitions | std::views::values |
 			   std::views::transform([](auto &labelAndTo) -> auto & { return std::get<1>(std::get<0>(labelAndTo)); });
+	}
+
+   public:
+	/// compact the output-tape values in this FST's monoid, if it is compactable
+	void CompactLabels() {
+		if constexpr (compactable_monoid<Monoid>) { get<1>(monoid).compact(TransitionValues(), f_eps); }
 	}
 };
 
@@ -247,9 +252,7 @@ auto pseudoDeterminizeFST(const T &fst) {
 	// the subset construction only ever visits states reachable from
 	// fst.Initial() (the BFS over `queue`) -- pool entries that were only
 	// referenced by transitions out of unreached states are now dead.
-	if constexpr (compactable_monoid<Monoid>) {
-		get<1>(dfa.monoid).compact(transitionValues(dfa.transitions), dfa.f_eps);
-	}
+	dfa.CompactLabels();
 
 	return dfa;
 }
@@ -282,9 +285,7 @@ auto reverseFST(const T &fst) {
 		}
 	}
 
-	if constexpr (compactable_monoid<typename FSA_t::Monoid>) {
-		get<1>(rev.monoid).compact(transitionValues(rev.transitions), rev.f_eps);
-	}
+	rev.CompactLabels();
 
 	return rev;
 }
@@ -426,16 +427,7 @@ auto crochemorePseudoMinimizeFST(const T &fst) {
 	if constexpr (SSFSTI<T> && SSFSTI_builder<Result>)
 		result.SetInitialOutput(get<1>(result.GetMonoid()).own(get<1>(fstMonoid), fst.InitialOutput()));
 
-	if constexpr (compactable_monoid<typename Result::Monoid>) {
-		if constexpr (requires { result.f_eps; })
-			get<1>(result.GetMonoid()).compact(result.TransitionValues(), result.f_eps);
-		else if constexpr (SSFSTI_builder<Result>)
-			get<1>(result.GetMonoid())
-				.compact(result.TransitionValues(), result.PsiValues(), result.InitialOutputSpan());
-		else if constexpr (SSFST_builder<Result>)
-			get<1>(result.GetMonoid()).compact(result.TransitionValues(), result.PsiValues());
-		else get<1>(result.GetMonoid()).compact(result.TransitionValues());
-	}
+	result.CompactLabels();
 
 	return result;
 }

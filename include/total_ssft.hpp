@@ -51,6 +51,15 @@ class TotalSSFST {
 	std::vector<OutValue> output;
 	OutValue			  initialOut = OutputMonoid::identity;
 
+	auto TransitionValues() & {
+		return transitions | std::views::join |
+			   std::views::transform([](Trans &t) -> OutValue & { return t.outputID; });
+	}
+
+	auto PsiValues() & { return std::span<OutValue>(output); }
+
+	auto InitialOutputSpan() & { return std::span<OutValue>(&initialOut, 1); }
+
    public:
 	TotalSSFST() = default;
 
@@ -101,20 +110,7 @@ class TotalSSFST {
 	[[clang::always_inline]] inline auto &RawTransitions() const { return transitions; }
 	[[clang::always_inline]] inline auto  RawTransitions()	&&{ return std::move(transitions); }
 
-	/// mutable, storage-backed view of every transition's output value -- unlike Transitions(),
-	/// which synthesizes a fresh tuple per element, this aliases the real Trans::outputID fields
-	/// so compact() can renumber them in place.
-	auto TransitionValues() & {
-		return transitions | std::views::join |
-			   std::views::transform([](Trans &t) -> OutValue & { return t.outputID; });
-	}
-
-	/// mutable, storage-backed view of every state's final output -- same role as
-	/// TransitionValues(), but for Psi rather than the transition labels.
-	auto PsiValues() & { return std::span<OutValue>(output); }
-
-	/// single-element mutable view of the initial output, for the same reason.
-	auto InitialOutputSpan() & { return std::span<OutValue>(&initialOut, 1); }
+	void CompactLabels() { get<1>(monoid).compact(TransitionValues(), PsiValues(), InitialOutputSpan()); }
 
 	const Monoid &GetMonoid() const { return monoid; }
 	Monoid		 &GetMonoid()		&{ return monoid; }
