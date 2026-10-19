@@ -59,6 +59,14 @@ static_assert(fl::SSFSTI<fl::TotalSSFST<fl::Letter>>,
 static_assert(fl::SSFSTI_traversable<fl::TotalSSFST<fl::Letter>>,
 			  "TotalSSFT does not satisfy the subsequential transducer traversable concept");
 
+// from CompressedTotalSSFT.hpp
+static_assert(fl::SSFSTI<fl::CompressedTotalSSFST<fl::Letter>>,
+			  "CompressedTotalSSFST does not satisfy the subsequential transducer concept");
+static_assert(fl::SSFSTI_traversable<fl::CompressedTotalSSFST<fl::Letter>>,
+			  "CompressedTotalSSFST does not satisfy the subsequential transducer traversable concept");
+static_assert(fl::FSA_builder<fl::CompressedTotalSSFST<fl::Letter>>,
+			  "CompressedTotalSSFST does not satisfy the FSA_builder concept");
+
 // from SSFT.hpp
 static_assert(fl::SSFST<SSFSTType>, "SparseSSFST does not satisfy the subsequential transducer concept");
 static_assert(fl::SSFST_traversable<SSFSTType>,

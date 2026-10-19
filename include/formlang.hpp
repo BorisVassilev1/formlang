@@ -25,6 +25,7 @@
 #include "fst.hpp"
 #include "fst_from_regex.hpp"
 #include "total_ssft.hpp"
+#include "compressed_total_ssft.hpp"
 #include "ambiguity.hpp"
 #include "expanded_fst.hpp"
 #include "compose.hpp"

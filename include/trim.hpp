@@ -146,10 +146,18 @@ auto trimFSA(T &&fsa) {
 		if (new_map[q] != -1u) { new_fsa.AddFinal(new_map[q]); }
 	}
 
+	// snapshotted BEFORE the monoid move below: some FSA types (e.g.
+	// CompressedTotalSSFST) materialize a transition's label lazily, through
+	// the monoid itself, the first time Transitions() is actually read -- so
+	// enumerating it after fsa's monoid has been moved out from under it would
+	// reach into storage that is no longer there.
+	std::vector<std::tuple<TState, typename T::Monoid::Value, TState>> transitionsSnapshot(fsa.Transitions().begin(),
+																							fsa.Transitions().end());
+
 	new_fsa.GetMonoid() = std::move(fsa.GetMonoid());	  /// should preserve values
 	if constexpr (requires { fsa.f_eps; }) { new_fsa.f_eps = std::move(fsa.f_eps); }
 
-	for (const auto &[from, label, to] : fsa.Transitions()) {
+	for (const auto &[from, label, to] : transitionsSnapshot) {
 		if (new_map[from] != -1u && new_map[to] != -1u) { new_fsa.AddTransition(new_map[from], label, new_map[to]); }
 	}
 
