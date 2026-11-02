@@ -3,7 +3,6 @@
 #include <cstddef>
 #include <ostream>
 #include <unordered_map>
-#include <format>
 #include <ranges>
 #include <string>
 

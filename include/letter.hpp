@@ -3,7 +3,6 @@
 #include <cstddef>
 #include <ranges>
 #include <ostream>
-#include <format>
 #include <ranges>
 
 #include "concepts.hpp"
@@ -60,7 +59,9 @@ inline std::ostream &operator<<(std::ostream &out, Letter l) {
 
 }	  // namespace fl
 
+#if defined(FAKE_FORMAT_IS_REAL)
 template <>
 struct std::formatter<fl::Letter> : fl::ostream_formatter {};
+#endif
 
 static_assert(fl::symbol<fl::Letter>, "fl::Letter does not satisfy isLetter concept");

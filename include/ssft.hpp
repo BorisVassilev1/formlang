@@ -3,7 +3,6 @@
 #include <ranges>
 #include <map>
 #include <chrono>
-#include <format>
 #include <iostream>
 #include <stack>
 #include <array>
@@ -14,6 +13,7 @@
 
 #include "debug_macros.hpp"
 
+#include "fake_format.hpp"
 #include "expanded_fst.hpp"
 #include "interning_monoid.hpp"
 #include "concepts.hpp"

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <format>
 #include <string>
 #include <tuple>
 #include <unordered_map>
@@ -14,6 +13,7 @@
 #include "concepts.hpp"
 #include "hashing.hpp"
 #include "dbg.hpp"
+#include "formatting.hpp"
 
 namespace fl {
 /**

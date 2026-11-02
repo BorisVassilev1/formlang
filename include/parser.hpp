@@ -6,7 +6,6 @@
 #include <ratio>
 #include <stack>
 #include <unordered_map>
-#include <format>
 #include <iostream>
 #include <string>
 #include <vector>

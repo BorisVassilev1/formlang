@@ -14,7 +14,6 @@
 #include <iterator>
 #include <functional>
 #include <cstdint>
-#include <format>
 
 #include "dbg.hpp"
 #include "concepts.hpp"

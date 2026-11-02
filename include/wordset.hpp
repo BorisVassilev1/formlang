@@ -9,7 +9,6 @@
 #include <unordered_map>
 #include <vector>
 #include <ranges>
-#include <format>
 
 #include "concepts.hpp"
 

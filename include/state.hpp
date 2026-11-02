@@ -2,7 +2,6 @@
 
 #include <cstddef>
 #include <ostream>
-#include <format>
 
 #include "concepts.hpp"
 #include "formatting.hpp"
@@ -32,5 +31,7 @@ std::ostream &operator<<(std::ostream &out, State<Symbol> s) {
 }
 }	  // namespace fl
 
+#if defined(FAKE_FORMAT_IS_REAL)
 template <fl::symbol Symbol>
 struct std::formatter<fl::State<Symbol>> : fl::ostream_formatter {};
+#endif

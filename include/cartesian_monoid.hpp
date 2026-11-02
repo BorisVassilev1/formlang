@@ -9,7 +9,6 @@
 #include <utility>
 #include <ranges>
 #include <iterator>
-#include <format>
 
 #include "concepts.hpp"
 #include "formatting.hpp"
@@ -288,10 +287,12 @@ constexpr decltype(auto) out(C &&cartesian) {
 
 };	   // namespace fl
 
+#if defined(FAKE_FORMAT_IS_REAL)
 template <class... OwnedTs, std::size_t... Slots>
 	requires(fl::monoid<std::remove_cvref_t<OwnedTs>> && ...) && (sizeof...(Slots) >= 1)
 struct std::formatter<fl::CartesianMonoidElementPrinter<std::tuple<OwnedTs...>, Slots...>, char>
 	: fl::ostream_formatter {};
+#endif
 
 template <class C>
 	requires std::derived_from<C, fl::CartesianMonoidBase>

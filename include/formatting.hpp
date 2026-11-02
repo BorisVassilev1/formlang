@@ -5,10 +5,10 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <vector>
-#include <format>
 #include <string_view>
 #include <sstream>
 
+#include "fake_format.hpp"
 
 namespace fl {
 
@@ -61,6 +61,7 @@ std::ostream &operator<<(std::ostream &out, const std::unordered_map<A, B> &m) {
 	return out;
 }
 
+#if defined(FAKE_FORMAT_IS_REAL)
 template <typename Char>
 struct basic_ostream_formatter : std::formatter<std::basic_string_view<Char>, Char> {
 	template <typename T, typename OutputIt>
@@ -73,9 +74,11 @@ struct basic_ostream_formatter : std::formatter<std::basic_string_view<Char>, Ch
 };
 
 using ostream_formatter = basic_ostream_formatter<char>;
+#endif
 
 }	  // namespace fl
 
+#if defined(FAKE_FORMAT_IS_REAL)
 template <>
 struct std::formatter<std::exception> : fl::ostream_formatter {};
 template <class... Args>
@@ -88,3 +91,4 @@ template <class T>
 struct std::formatter<std::vector<T>> : fl::ostream_formatter {};
 template <class A, class B>
 struct std::formatter<std::unordered_multimap<A, B>> : fl::ostream_formatter {};
+#endif
