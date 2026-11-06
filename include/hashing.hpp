@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <span>
 #include <string_view>
@@ -60,8 +61,18 @@ struct hash<State> {
 
 // boost::hash_combine, see
 // https://www.boost.org/doc/libs/1_86_0/libs/container_hash/doc/html/hash.html#notes_hash_combine
-constexpr void hash_combine(std::size_t &seed, std::size_t value) {
-	seed ^= value + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+// constexpr void hash_combine(std::size_t &seed, std::size_t value) {
+//	seed ^= value + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+//}
+constexpr void hash_combine(uint64_t &seed, uint64_t value) {
+	__uint128_t m = (__uint128_t)(seed ^ 0x2d358dccaa6c78a5ULL) * (value ^ 0x8bb84b93962eacc9ULL);
+	seed		  = (uint64_t)m ^ (uint64_t)(m >> 64);
+}
+
+constexpr uint64_t mix64(uint64_t x) {
+	x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ULL;
+	x = (x ^ (x >> 27)) * 0x94D049BB133111EBULL;
+	return x ^ (x >> 31);
 }
 
 template <class T>
