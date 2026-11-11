@@ -3,8 +3,11 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
+#include <fstream>
 #include <functional>
 #include <iostream>
+#include <iterator>
 #include <string>
 #include <sstream>
 #include <iomanip>
@@ -16,6 +19,29 @@
 #include "formatting.hpp"
 
 namespace fl {
+
+namespace detail {
+
+// Graphviz writes the drawing's physical size in points (1in = 72pt) on the top-level <svg ...> tag, e.g.
+// `width="394pt" height="4320pt"`. Rasterizing viewers built on librsvg (feh among them) refuse to render
+// anything wider or taller than 32767px, which at a typical 96dpi corresponds to this many points -- past
+// that, the SVG is perfectly valid but feh reports it as a broken image.
+constexpr double LIBRSVG_RASTER_LIMIT_PT = 32767.0 * 72.0 / 96.0;
+
+inline double svg_tag_dimension_pt(const std::string &svg_text, const char *attr) {
+	const auto pos = svg_text.find(attr);
+	if (pos == std::string::npos) return 0.0;
+	return std::strtod(svg_text.c_str() + pos + std::strlen(attr), nullptr);
+}
+
+inline bool svg_too_big_to_rasterize(const std::string &svg_path) {
+	std::ifstream	  in(svg_path);
+	const std::string svg_text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+	return svg_tag_dimension_pt(svg_text, "width=\"") > LIBRSVG_RASTER_LIMIT_PT ||
+		   svg_tag_dimension_pt(svg_text, "height=\"") > LIBRSVG_RASTER_LIMIT_PT;
+}
+
+}	  // namespace detail
 
 template <class T>
 class RangeFromPair : public std::ranges::view_interface<RangeFromPair<T>> {
@@ -112,13 +138,29 @@ class Timer {
 
 template <class T>
 void drawFSA(const T &fsa) {
-	ShellProcess p("dot -Tsvg > a.svg && feh ./a.svg");
-	fsa.print(p.in());
-	p.in() << std::endl;
-	p.in().close();
-	p.wait();
-	std::cout << getString(p.out()) << std::endl;
-	std::cout << getString(p.err()) << std::endl;
+	{
+		ShellProcess p("dot -Tsvg > a.svg");
+		fsa.print(p.in());
+		p.in() << std::endl;
+		p.in().close();
+		p.wait();
+		if (auto out = getString(p.out()); !out.empty()) std::cerr << out << std::endl;
+		if (auto err = getString(p.err()); !err.empty()) std::cerr << err << std::endl;
+	}
+
+	/// feh will fail to rasterize big SVGs, so use firefox instead if the SVG is too big
+	bool		is_too_big = detail::svg_too_big_to_rasterize("a.svg");
+	const char *viewer_cmd;
+	if (is_too_big) {
+		std::cerr << "SVG is too big to rasterize with feh, using firefox instead" << std::endl;
+		viewer_cmd = "firefox ./a.svg";
+	} else {
+		viewer_cmd = "feh ./a.svg";
+	}
+	ShellProcess viewer(viewer_cmd);
+	viewer.wait();
+	if (auto out = getString(viewer.out()); !out.empty()) std::cerr << out << std::endl;
+	if (auto err = getString(viewer.err()); !err.empty()) std::cerr << err << std::endl;
 }
 
 void print_escaped_char(std::ostream &out, unsigned char c);
