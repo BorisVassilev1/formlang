@@ -148,6 +148,11 @@ void drawFSA(const T &fsa) {
 		if (auto err = getString(p.err()); !err.empty()) std::cerr << err << std::endl;
 	}
 
+	if (std::getenv("FL_NO_DRAWING")) {
+		std::cerr << "FL_NO_DRAWING set, skipping drawing. Output is in a.svg" << std::endl;
+		return;
+	}
+
 	/// feh will fail to rasterize big SVGs, so use firefox instead if the SVG is too big
 	bool		is_too_big = detail::svg_too_big_to_rasterize("a.svg");
 	const char *viewer_cmd;
